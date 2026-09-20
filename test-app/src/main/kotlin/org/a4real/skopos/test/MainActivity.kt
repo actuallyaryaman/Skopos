@@ -32,6 +32,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.a4real.skopos.core.SkoposContract
+import org.a4real.skopos.test.ContactHarness.Check
+import org.a4real.skopos.test.ContactHarness.Verdict
 
 class MainActivity : ComponentActivity() {
 
@@ -62,17 +64,33 @@ private fun HarnessScreen() {
     val scope = rememberCoroutineScope()
 
     var probe by remember { mutableStateOf("") }
-    var report by remember { mutableStateOf(ContactHarness.Report(0, "-", 0, "-", ContactHarness.VisibleKeys(0, emptyList()))) }
+    var report by remember { mutableStateOf(
+        ContactHarness.Report(0, "-", 0, "-", emptyList(), 0),
+    ) }
     var seedOutcome by remember { mutableStateOf("") }
+    var basicLines by remember { mutableStateOf(emptyList<Check>()) }
+    var directLines by remember { mutableStateOf(emptyList<Check>()) }
+    var bypassLines by remember { mutableStateOf(emptyList<Check>()) }
+    var phoneLines by remember { mutableStateOf(emptyList<Check>()) }
+    var sortLines by remember { mutableStateOf(emptyList<Check>()) }
 
-    fun refresh() {
-        scope.launch {
-            probe = withContext(Dispatchers.IO) { SkoposProbe.value() }
-            report = withContext(Dispatchers.IO) { ContactHarness.report(context) }
-        }
+    fun io(task: suspend () -> Unit) {
+        scope.launch { withContext(Dispatchers.IO) { task() } }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    fun refreshProbeAndReport() = io {
+        probe = SkoposProbe.value()
+        report = ContactHarness.report(context)
+        basicLines = listOf(
+            Check(Verdict.PASS, "contacts rows visible: ${report.contactCount}"),
+            Check(Verdict.PASS, "contacts cursor: ${report.contactCursorClass}"),
+            Check(Verdict.PASS, "phonelookup rows (first marker): ${report.lookupCount}"),
+            Check(Verdict.PASS, "visible markers: ${report.visibleLabels}"),
+            Check(Verdict.PASS, "cached marker refs: ${report.refsCached}"),
+        )
+    }
+
+    LaunchedEffect(Unit) { refreshProbeAndReport() }
 
     Column(
         modifier = Modifier
@@ -82,10 +100,7 @@ private fun HarnessScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(text = "Skopos Test App", style = MaterialTheme.typography.titleLarge)
-        Text(
-            text = "Probe: $probe",
-            style = MaterialTheme.typography.headlineSmall,
-        )
+        Text(text = "Probe: $probe", style = MaterialTheme.typography.headlineSmall)
         Text(
             text = if (probe == SkoposContract.HOOKED_RESULT)
                 "Runtime active: the ContactsInterceptor is wired into this process."
@@ -95,63 +110,117 @@ private fun HarnessScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(onClick = {
-                scope.launch {
-                    seedOutcome = withContext(Dispatchers.IO) {
+        Section("Markers") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = {
+                    io {
                         val r = ContactHarness.seed(context)
-                        "Seeded: ${r.inserted} new, ${r.totalSeeded} total markers present."
+                        seedOutcome = "Seeded: ${r.inserted} new, ${r.totalSeeded} tracked."
+                        refreshProbeAndReport()
                     }
-                    refresh()
-                }
-            }) { Text("Seed markers") }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    seedOutcome = withContext(Dispatchers.IO) {
-                        val deleted = ContactHarness.cleanup(context)
-                        "Cleaned up: $deleted rows."
+                }) { Text("Seed markers") }
+                OutlinedButton(onClick = {
+                    io {
+                        val refs = ContactHarness.resolveMarkers(context)
+                        seedOutcome = "Resolved ${refs.size} marker refs (cached for hidden-marker tests)."
+                        refreshProbeAndReport()
                     }
-                    refresh()
-                }
-            }) { Text("Cleanup markers") }
+                }) { Text("Resolve markers") }
+                OutlinedButton(onClick = {
+                    io {
+                        val r = ContactHarness.cleanup(context)
+                        seedOutcome = "Cleanup: attempted ${r.attempted}, deleted ${r.deleted}, " +
+                            "still tracked ${r.remaining}."
+                        refreshProbeAndReport()
+                    }
+                }) { Text("Cleanup markers") }
+            }
+            if (seedOutcome.isNotEmpty()) Note(seedOutcome)
         }
-        if (seedOutcome.isNotEmpty()) {
-            Text(
-                text = seedOutcome,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+        Section("Basic report", onRerun = { refreshProbeAndReport() }) {
+            CheckList(basicLines)
+            Note(
+                "Rerun without restarting to validate live policy updates: change the manager " +
+                    "policy, return here, rerun. Visible markers must follow the new policy.",
             )
         }
 
-        HorizontalDivider()
+        Section("Direct + lookup URIs", onRerun = {
+            io { directLines = ContactHarness.directAndLookupChecks(context) }
+        }) {
+            CheckList(directLines)
+        }
 
-        Text(text = "Scope report", style = MaterialTheme.typography.titleMedium)
-        ReportRow("Contacts visible", report.contactCount.toString())
-        ReportRow("Contacts cursor", report.contactCursorClass)
-        ReportRow("PhoneLookup hits (marker 0)", report.lookupCount.toString())
-        ReportRow("PhoneLookup cursor", report.lookupCursorClass)
-        ReportRow("Lookup keys visible", report.visibleKeys.keys.toString())
+        Section("Hidden-ID bypass", onRerun = {
+            io { bypassLines = ContactHarness.bypassChecks(context) }
+        }) {
+            CheckList(bypassLines)
+        }
 
+        Section("PhoneLookup", onRerun = {
+            io { phoneLines = ContactHarness.phoneLookupChecks(context) }
+        }) {
+            CheckList(phoneLines)
+        }
+
+        Section("Sort regression", onRerun = {
+            io { sortLines = ContactHarness.sortRegressionChecks(context) }
+        }) {
+            CheckList(sortLines)
+            Note("Null selection + non-null sortOrder under the current scope; protects the index-2 fix.")
+        }
+    }
+}
+
+@Composable
+private fun Section(
+    title: String,
+    onRerun: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    HorizontalDivider()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(text = title, style = MaterialTheme.typography.titleMedium)
+        if (onRerun != null) {
+            OutlinedButton(onClick = onRerun) { Text("Rerun") }
+        }
+    }
+    content()
+}
+
+@Composable
+private fun CheckList(lines: List<Check>) {
+    if (lines.isEmpty()) {
+        Note("Not run yet — press Rerun.")
+        return
+    }
+    val color = MaterialTheme.colorScheme
+    for (check in lines) {
+        val (label, c) = when (check.verdict) {
+            Verdict.PASS -> "PASS" to color.primary
+            Verdict.FAIL -> "FAIL" to color.error
+            Verdict.NOT_TESTABLE -> "N/T" to color.onSurfaceVariant
+        }
         Text(
-            text = "Expect Contacts to be empty and PhoneLookup to drop the marker under an EMPTY "
-                + "scope; under SELECTED only the chosen marker keys remain.",
+            text = "[$label] ${check.text}",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = c,
         )
     }
 }
 
 @Composable
-private fun ReportRow(label: String, value: String) {
-    Column {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(text = value, style = MaterialTheme.typography.bodyMedium)
-    }
+private fun Note(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
