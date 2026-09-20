@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <application
         android:label="Skopos"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <!-- The Vector daemon delivers its service binder to this authority
+             ({applicationId} + ".XposedService") by forging a ContentProvider call;
+             exported because the daemon reaches it across processes. -->
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="org.a4real.skopos.XposedService"
+            android:exported="true" />
 
         <activity
             android:name=".MainActivity"

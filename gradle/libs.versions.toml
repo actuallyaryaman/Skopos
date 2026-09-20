@@ -26,6 +26,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
 libxposed-annotation = { group = "io.github.libxposed", name = "annotation", version.ref = "libxposedAnnotation" }
+libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposedApi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

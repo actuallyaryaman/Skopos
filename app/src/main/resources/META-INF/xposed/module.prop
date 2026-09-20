@@ -1,0 +1,7 @@
+id=org.a4real.skopos
+name=Skopos
+version=0.1
+author=Skopos
+description=Contact privacy scoping runtime (Vector module + manager)
+minApiVersion=101
+targetApiVersion=102
