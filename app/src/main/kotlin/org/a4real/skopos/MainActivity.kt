@@ -33,7 +33,7 @@ import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.SkoposContract
 import org.a4real.skopos.data.AppDiscovery
 import org.a4real.skopos.data.AppRow
-import org.a4real.skopos.data.ContactsAccess
+import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository
 import org.a4real.skopos.data.ThemePreferences
 import org.a4real.skopos.ui.AppDetailScreen
@@ -194,6 +194,7 @@ class MainActivity : ComponentActivity() {
         var contactsGranted by remember { mutableStateOf(false) }
         var deniedPermanently by remember { mutableStateOf(false) }
         var contacts by remember { mutableStateOf(emptyList<PolicyRepository.DeviceContact>()) }
+        var contactsError by remember { mutableStateOf(false) }
         var search by remember { mutableStateOf("") }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
 
@@ -206,6 +207,8 @@ class MainActivity : ComponentActivity() {
         }
 
         LaunchedEffect(tick) {
+            // Capture UI state on the main thread; the IO block below must not read it.
+            val uiOption = option
             val loaded = withContext(Dispatchers.IO) {
                 val isConnected = repository.connected
                 val state = repository.currentPolicy()
@@ -214,10 +217,16 @@ class MainActivity : ComponentActivity() {
                 } else null
                 val granted = hasReadContactsPermission()
                 val opt = ScopeOption.fromPolicy(state)
-                val list = if (ContactsAccess.mayQuery(granted, opt == ScopeOption.SELECTED)) {
-                    repository.deviceContacts()
+                var loadFailed = false
+                val list = if (ScopeOption.pickerLoads(granted, uiOption)) {
+                    try {
+                        repository.deviceContacts()
+                    } catch (_: Throwable) {
+                        loadFailed = true
+                        emptyList()
+                    }
                 } else emptyList()
-                LoadedDetail(isConnected, state, active, granted, opt, list)
+                LoadedDetail(isConnected, state, active, granted, opt, list, loadFailed)
             }
             connected = loaded.connected
             policy = loaded.policy
@@ -231,6 +240,7 @@ class MainActivity : ComponentActivity() {
             }
             // Selection and picker rows always follow the durable store, never local edits.
             contacts = loaded.contacts
+            contactsError = loaded.loadFailed
         }
         LaunchedEffect(Unit) {
             while (true) {
@@ -257,6 +267,7 @@ class MainActivity : ComponentActivity() {
             option = option,
             selectedKeys = selectedKeys,
             contacts = contacts,
+            contactsError = contactsError,
             staleCount = staleCount,
             search = search,
             onSearchChange = { search = it },
@@ -293,27 +304,20 @@ class MainActivity : ComponentActivity() {
                         }
                         tick++
                     }
-                    ScopeOption.SELECTED -> if (!contactsGranted) {
-                        feedback = "Contacts access is needed to choose contacts."
-                        permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                    } else scope.launch {
-                        val base = selectedKeys
-                        val alreadyFull = base.isEmpty() &&
-                            (policy as? PolicyState.Configured)?.scope is ContactScope.Full
-                        val ok = if (alreadyFull) true
-                        else withContext(Dispatchers.IO) {
-                            repository.writeScope(ContactScope.from(base))
+                    ScopeOption.SELECTED -> when (PickerPolicy.decideOpenSelected(contactsGranted, policy)) {
+                        PickerPolicy.PickerOpenAction.RequestPermission -> {
+                            feedback = "Contacts access is needed to choose contacts."
+                            permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                         }
-                        if (ok) {
+                        // Opening the picker is navigation only: it must never publish
+                        // (in particular never ContactScope.from(emptySet()) == EMPTY).
+                        // A SELECTED policy persists exclusively via contact toggles.
+                        PickerPolicy.PickerOpenAction.OpenPicker -> {
                             option = ScopeOption.SELECTED
                             userChose = true
-                            feedback = if (alreadyFull) "Choose contacts to publish a selection."
-                            else "Scope published to the daemon."
-                        } else {
-                            userChose = false
-                            feedback = "Daemon not connected — not published."
+                            feedback = "Choose contacts to publish a selection."
+                            tick++
                         }
-                        tick++
                     }
                 }
             },
@@ -385,5 +389,6 @@ class MainActivity : ComponentActivity() {
         val granted: Boolean,
         val option: ScopeOption?,
         val contacts: List<PolicyRepository.DeviceContact>,
+        val loadFailed: Boolean,
     )
 }

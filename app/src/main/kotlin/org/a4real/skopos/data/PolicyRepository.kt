@@ -131,35 +131,39 @@ class PolicyRepository private constructor(
      * All device contacts, loaded off the UI thread by the caller. Returns an empty list
      * without permission; failures never crash the manager.
      */
+    /**
+     * All device contacts, loaded off the UI thread by the caller. Returns an empty list
+     * without permission; provider failures throw so the caller can distinguish an error
+     * from a genuine zero-contact result.
+     */
     fun deviceContacts(): List<DeviceContact> {
         if (!hasReadContactsPermission) return emptyList()
-        return runCatching {
-            markerResolver.query(
-                ContactsContract.Contacts.CONTENT_URI,
-                arrayOf(
-                    ContactsContract.Contacts._ID,
-                    ContactsContract.Contacts.LOOKUP_KEY,
-                    ContactsContract.Contacts.DISPLAY_NAME,
-                ),
-                null, null,
-                "${ContactsContract.Contacts.DISPLAY_NAME} ASC",
-            )?.use { cursor ->
-                val idIdx = cursor.getColumnIndex(ContactsContract.Contacts._ID)
-                val keyIdx = cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY)
-                val nameIdx = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
-                val ids = mutableListOf<Long>()
-                val rows = mutableListOf<Triple<Long, String, String>>()
-                while (cursor.moveToNext()) {
-                    val name = cursor.getString(nameIdx) ?: continue
-                    val key = cursor.getString(keyIdx) ?: continue
-                    val id = cursor.getLong(idIdx)
-                    ids += id
-                    rows += Triple(id, key, name)
-                }
-                val phones = phonesFor(ids)
-                rows.map { (id, key, name) -> DeviceContact(id, key, name, phones[id]) }
-            } ?: emptyList()
-        }.getOrDefault(emptyList())
+        val found = markerResolver.query(
+            ContactsContract.Contacts.CONTENT_URI,
+            arrayOf(
+                ContactsContract.Contacts._ID,
+                ContactsContract.Contacts.LOOKUP_KEY,
+                ContactsContract.Contacts.DISPLAY_NAME,
+            ),
+            null, null,
+            "${ContactsContract.Contacts.DISPLAY_NAME} ASC",
+        )?.use { cursor ->
+            val idIdx = cursor.getColumnIndex(ContactsContract.Contacts._ID)
+            val keyIdx = cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY)
+            val nameIdx = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
+            val ids = mutableListOf<Long>()
+            val rows = mutableListOf<Triple<Long, String, String>>()
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameIdx) ?: continue
+                val key = cursor.getString(keyIdx) ?: continue
+                val id = cursor.getLong(idIdx)
+                ids += id
+                rows += Triple(id, key, name)
+            }
+            val phones = phonesFor(ids)
+            rows.map { (id, key, name) -> DeviceContact(id, key, name, phones[id]) }
+        } ?: emptyList()
+        return found
     }
 
     /**

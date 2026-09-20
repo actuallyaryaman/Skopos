@@ -172,6 +172,7 @@ fun AppDetailScreen(
     option: ScopeOption?,
     selectedKeys: Set<String>,
     contacts: List<DeviceContact>,
+    contactsError: Boolean,
     staleCount: Int,
     search: String,
     onSearchChange: (String) -> Unit,
@@ -280,7 +281,8 @@ fun AppDetailScreen(
                 if (shown.isEmpty()) {
                     item {
                         Text(
-                            text = "No contacts match.",
+                            text = if (contactsError) "Couldn't load contacts — check access and retry."
+                            else "No contacts match.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -468,6 +470,14 @@ enum class ScopeOption(val label: String) {
     companion object {
         /** Writable tabs. UNSET has no tab: absence is displayed, never published. */
         val tabs: List<ScopeOption> = listOf(FULL, EMPTY, SELECTED)
+
+        /**
+         * Whether the picker contact list should load: granted permission plus the UI picker
+         * being open. Deliberately independent of the persisted policy — opening SELECTED
+         * from UNSET/FULL/EMPTY must still load contacts, or the picker deadlocks empty.
+         */
+        fun pickerLoads(granted: Boolean, uiOption: ScopeOption?): Boolean =
+            ContactsAccess.mayQuery(granted, uiOption == SELECTED)
 
         fun fromPolicy(state: PolicyState?): ScopeOption? = when (state) {
             is PolicyState.Configured -> when (state.scope) {
