@@ -61,9 +61,8 @@ class MainActivity : ComponentActivity() {
             var tick by remember { mutableIntStateOf(0) }
             var connected by remember { mutableStateOf(false) }
             var currentScope by remember { mutableStateOf<ContactScope?>(null) }
-            // The user's picker choice is explicit UI state: once the user touches it, the
-            // poll stops overwriting it from the published scope (a SELECTED entry awaiting
-            // permission must survive until the user acts again).
+            // The picker/tab choice latches only after a successful daemon write; a failed
+            // write clears the latch so the poll below resyncs the display from the store.
             var option by remember { mutableStateOf(ScopeOption.EMPTY) }
             var userChose by remember { mutableStateOf(false) }
             var contactsGranted by remember { mutableStateOf(false) }
@@ -118,24 +117,51 @@ class MainActivity : ComponentActivity() {
                     deniedPermanently = deniedPermanently,
                     feedback = feedback,
                     onChooseOption = { chosen ->
-                        userChose = true
-                        option = chosen
                         when (chosen) {
                             ScopeOption.FULL -> scope.launch {
                                 val ok = policyRepository.writeScope(ContactScope.Full)
-                                feedback = if (ok) "Scope published to the daemon."
-                                else "Daemon not connected — not published."
+                                if (ok) {
+                                    option = ScopeOption.FULL
+                                    userChose = true
+                                    feedback = "Scope published to the daemon."
+                                } else {
+                                    userChose = false
+                                    feedback = "Daemon not connected — not published."
+                                }
                                 tick++
                             }
                             ScopeOption.EMPTY -> scope.launch {
                                 val ok = policyRepository.writeScope(ContactScope.Empty)
-                                feedback = if (ok) "Scope published to the daemon."
-                                else "Daemon not connected — not published."
+                                if (ok) {
+                                    option = ScopeOption.EMPTY
+                                    userChose = true
+                                    feedback = "Scope published to the daemon."
+                                } else {
+                                    userChose = false
+                                    feedback = "Daemon not connected — not published."
+                                }
                                 tick++
                             }
                             ScopeOption.SELECTED -> if (!contactsGranted) {
                                 feedback = "Contacts access is needed to choose contacts."
                                 permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            } else scope.launch {
+                                val base = (currentScope as? ContactScope.Selected)?.lookupKeys ?: emptySet()
+                                // Opening the picker with nothing selected publishes nothing:
+                                // this must not demote an explicit FULL to EMPTY.
+                                val alreadyFull = base.isEmpty() && currentScope is ContactScope.Full
+                                val ok = if (alreadyFull) true
+                                else policyRepository.writeScope(ContactScope.from(base))
+                                if (ok) {
+                                    option = ScopeOption.SELECTED
+                                    userChose = true
+                                    feedback = if (alreadyFull) "Choose contacts to publish a selection."
+                                    else "Scope published to the daemon."
+                                } else {
+                                    userChose = false
+                                    feedback = "Daemon not connected — not published."
+                                }
+                                tick++
                             }
                         }
                     },
@@ -143,9 +169,16 @@ class MainActivity : ComponentActivity() {
                         scope.launch {
                             val current = (currentScope as? ContactScope.Selected)?.lookupKeys ?: emptySet()
                             val next = if (checked) current + key else current - key
-                            val ok = policyRepository.writeScope(ContactScope.from(next))
-                            feedback = if (ok) "Scope published to the daemon."
-                            else "Daemon not connected — not published."
+                            val published = ContactScope.from(next)
+                            val ok = policyRepository.writeScope(published)
+                            if (ok) {
+                                option = ScopeOption.from(published)
+                                userChose = true
+                                feedback = "Scope published to the daemon."
+                            } else {
+                                userChose = false
+                                feedback = "Daemon not connected — not published."
+                            }
                             tick++
                         }
                     },

@@ -10,7 +10,6 @@ import io.github.libxposed.api.XposedInterface
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.ScopeConstraint
 import org.a4real.skopos.core.ScopeFamily
-import org.a4real.skopos.core.SkoposContract
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -26,9 +25,9 @@ import java.util.concurrent.CopyOnWriteArraySet
  *
  * Re-entrancy: ContentResolver.query reaches the provider through ContentProviderClient.query,
  * so both are hooked; the [Reentrancy] guard makes whichever runs second pass through without
- * a second rewrite, and covers Skopos's own policy resolution reads.
+ * a second rewrite, and covers Skopos's own policy-resolution reads.
  */
-class ContactsInterceptor(
+internal class ContactsInterceptor(
     private val entry: XposedEntry,
     private val policy: PolicyCache,
 ) {
@@ -36,22 +35,29 @@ class ContactsInterceptor(
     private val hooks = CopyOnWriteArraySet<XposedInterface.HookHandle>()
 
     /**
-     * Finds and hooks every query() method on the two query entry points. Methods that are not
-     * contacts queries, and queries on families the policy leaves untouched, bail before any
-     * argv slot is rewritten.
+     * Finds and hooks every query() method on the two query entry points. Hooking needs only the
+     * target classloader, never an Application/Context: both entry classes are framework classes
+     * resolvable through it. The lazy [PolicyCache.ensureInitialized] inside [onQuery] is what
+     * picks up the app context on first contact; it is a no-op once initialized.
      */
-    fun install(defaultClassLoader: ClassLoader) {
+    fun install(classLoader: ClassLoader) {
         listOf(
             ContentResolver::class.java,
             ContentProviderClient::class.java,
         ).forEach { owner ->
-            runCatching {
-                val runtime = defaultClassLoader.loadClass(owner.name)
-                runtime.declaredMethods
-                    .filter { it.name == "query" && Cursor::class.java.isAssignableFrom(it.returnType) }
-                    .filter { it.parameterTypes.isNotEmpty() && it.parameterTypes[0] == Uri::class.java }
-                    .forEach { method -> hooks += entry.hook(method).intercept { chain -> onQuery(chain) } }
-            }.onFailure { e -> entry.resolvedLog("Could not hook ${owner.simpleName}: ${e.message}") }
+            val runtime = runCatching { classLoader.loadClass(owner.name) }
+                .onFailure { e -> entry.resolvedLog("Could not load ${owner.simpleName}: ${e.message}") }
+                .getOrNull() ?: return@forEach
+            runtime.declaredMethods
+                .filter { it.name == "query" && Cursor::class.java.isAssignableFrom(it.returnType) }
+                .filter { it.parameterTypes.isNotEmpty() && it.parameterTypes[0] == Uri::class.java }
+                .forEach { method ->
+                    runCatching {
+                        hooks += entry.hook(method).intercept { chain -> onQuery(chain) }
+                    }.onFailure { e ->
+                        entry.resolvedLog("hook registration failed ${owner.simpleName}.${method.name}: ${e.message}")
+                    }
+                }
         }
     }
 
@@ -62,6 +68,8 @@ class ContactsInterceptor(
             val uri = args[0] as? Uri ?: return@withGuard chain.proceed()
             val family = UriClassifier.classify(uri)
                 ?: return@withGuard chain.proceed()
+            // Resume deferred policy initialization: ...
+            policy.ensureInitialized()
             val snapshot = policy.current()
 
             when (family) {
@@ -120,14 +128,8 @@ class ContactsInterceptor(
             }
         }
 
-        // Classic form: the third arg (index 2) is the selection string on both entry points.
-        val selectionIndex = args.indexOfFirst { it is String }
-        if (selectionIndex >= 0) {
-            val callerSelection = args[selectionIndex] as String?
-            val merged = ScopeConstraint.mergeSelection(callerSelection, constraint) ?: return null
-            return if (merged == callerSelection) null else selectionIndex to merged
-        }
-        return null
+        // Classic form: index 2 is always the selection string (nullable) on both entry points.
+        return classicSelectionRewrite(args, constraint)
     }
 
     /** Rewrites the projection for PhoneLookup so CONTACT_ID reaches the wrapper. */
@@ -137,7 +139,7 @@ class ContactsInterceptor(
         val projection = args[projectionIndex] as? Array<*> ?: return args.toTypedArray()
         if (projection.contains(PhoneLookup.CONTACT_ID)) return args.toTypedArray()
         val augmented = projection.toList() + PhoneLookup.CONTACT_ID
-        return args.toMutableList().also { it[projectionIndex] = augmented.toTypedArray() }.toTypedArray() as Array<Any?>
+        return args.toMutableList().also { it[projectionIndex] = augmented.toTypedArray() }.toTypedArray()
     }
 
     /** Position of the provider-facing CONTACT_ID column when the caller's projection omitted it. */

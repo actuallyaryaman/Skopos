@@ -1,91 +1,102 @@
 package org.a4real.skopos.runtime
 
-import android.content.ContentResolver
-import android.content.SharedPreferences
-import android.provider.ContactsContract
+import android.util.Log
 import org.a4real.skopos.core.ContactScope
-import org.a4real.skopos.core.ScopeConstraint
 import org.a4real.skopos.core.SkoposContract
 
 /**
  * The runtime's picture of the authoritative policy: a [ContactScope] plus the aggregate
  * contact ids it resolves to, swapped atomically on policy change.
  *
- * Read source is the injected process's RemotePreferences snapshot ([XposedModule] side).
- * The snapshot is delivered at construction; update pushes arrive on the preference-change
- * listener and trigger a re-resolve. Resolution and every exchange with the provider run
- * under [Reentrancy] so Skopos's own reads are not scoped or wrapped by its own hooks.
+ * The module entry constructs it at package-ready, which is BEFORE the target Application
+ * exists; only the [PolicyResolver] (which reads ContactsProvider through the app's
+ * ContentResolver) needs the Application. The two android sides are therefore behind small
+ * seams, and the holder itself is pure state: construction costs nothing, and initialization
+ * is deferred until either the Application is already available (eager call by the entry) or
+ * the first scoped query arrives — a point reached after the Application was created in the
+ * observed dispatch order, so the resolver is normally available by then; a miss simply
+ * retries on the next query.
  *
- * Absent or unparsable policy fails closed to [ContactScope.Empty]: a target that no scope
- * was ever written for sees zero contacts until the manager writes one.
+ * Behavior rules:
+ *  - [ensureInitialized] runs once and is idempotent (no double subscription, no re-read);
+ *  - a deferred state (resolver not yet available) is NOT a failure: it retries on the next
+ *    call and the current fail-closed snapshot keeps serving;
+ *  - a real initialization failure also keeps the fail-closed snapshot and is logged exactly
+ *    once, keeping lifecycle-deferral and policy failure distinguishable.
  */
-class PolicyCache(private val prefs: SharedPreferences, private val resolver: ContentResolver) {
+internal class PolicyCache(
+    private val source: PolicySource,
+    private val resolverProvider: () -> PolicyResolver?,
+) {
 
     @Volatile
     private var snapshot = Snapshot(ContactScope.Empty, emptySet())
 
-    private val listener =
-        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == SkoposContract.POLICY_KEY) refresh()
-        }
+    @Volatile
+    private var initialized = false
 
-    init {
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-        refresh()
-    }
+    @Volatile
+    private var activeResolver: PolicyResolver? = null
+
+    @Volatile
+    private var failureLogged = false
+
+    private val lock = Any()
 
     fun current(): Snapshot = snapshot
 
-    private fun refresh() {
-        val encoded = prefs.getString(SkoposContract.POLICY_KEY, null)
+    /** True when THIS call brought the cache out of the uninitialized state. */
+    fun ensureInitialized(): Boolean {
+        if (initialized) return false
+        synchronized(lock) {
+            if (initialized) return false
+            val resolver = resolverProvider() ?: return false
+            activeResolver = resolver
+            try {
+                source.onChanged { refresh() }
+                refresh(resolver)
+                initialized = true
+                return true
+            } catch (e: Throwable) {
+                if (!failureLogged) {
+                    failureLogged = true
+                    Log.w(
+                        "SkoposRuntime",
+                        "policy cache init failed (fail-closed EMPTY): ${e.message}",
+                    )
+                }
+                snapshot = Snapshot(ContactScope.Empty, emptySet())
+                return false
+            }
+        }
+    }
+
+    private fun refresh(resolver: PolicyResolver) {
+        val encoded = source.encoded()
         val scope = ContactScope.decode(encoded)
         val allowedIds = if (scope is ContactScope.Selected) {
-            resolveLookupKeys(scope.lookupKeys)
+            resolver.resolveKeys(scope.lookupKeys.toList())
         } else {
             emptySet()
         }
         snapshot = Snapshot(scope, allowedIds)
     }
 
-    fun resolveLookupKeys(lookupKeys: Set<String>): Set<Long> {
-        if (lookupKeys.isEmpty()) return emptySet()
-        val ids = mutableSetOf<Long>()
-        Reentrancy.withGuard {
-            lookupKeys.toList().chunked(ScopeConstraint.MAX_IN_LIST).forEach { chunk ->
-                val placeholders = chunk.joinToString(",") { "?" }
-                resolver.query(
-                    ContactsContract.Contacts.CONTENT_URI,
-                    arrayOf(ContactsContract.Contacts._ID),
-                    "${ContactsContract.Contacts.LOOKUP_KEY} IN ($placeholders)",
-                    chunk.toTypedArray(),
-                    null,
-                )?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        ids.add(cursor.getLong(0))
-                    }
-                }
-            }
-        }
-        return ids
+    private fun refresh() {
+        val resolver = activeResolver ?: return
+        refresh(resolver)
     }
 
     data class Snapshot(val scope: ContactScope, val allowedIds: Set<Long>)
 }
 
-/** Re-entrancy guard for the hook's own ContactsProvider traffic. */
-internal object Reentrancy {
-    private val active = ThreadLocal.withInitial { false }
+/** The durable policy read side; adapts Vector remote prefs in the real module. */
+internal interface PolicySource {
+    fun encoded(): String?
+    fun onChanged(handler: () -> Unit)
+}
 
-    inline fun <T> withGuard(block: () -> T): T {
-        if (active.get()) return block()
-        active.set(true)
-        try {
-            return block()
-        } finally {
-            active.set(false)
-        }
-    }
-
-    val isActive: Boolean
-        get() = active.get()
+/** Key-to-id resolution against ContactsProvider; the only piece needing the app context. */
+internal interface PolicyResolver {
+    fun resolveKeys(lookupKeys: List<String>): Set<Long>
 }
