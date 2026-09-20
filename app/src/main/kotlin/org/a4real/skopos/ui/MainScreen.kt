@@ -202,6 +202,7 @@ fun AppDetailScreen(
     vectorActive: Boolean?,
     vectorRequestPending: Boolean,
     option: ScopeOption?,
+    pickerOpen: Boolean,
     selectedKeys: Set<String>,
     contacts: List<DeviceContact>,
     contactsError: Boolean,
@@ -285,7 +286,9 @@ fun AppDetailScreen(
             )
         }
 
-        if (option == ScopeOption.SELECTED) {
+        // The picker follows the transient editing state, not the persisted option:
+        // a failed write or a lagging poll must never close it mid-selection.
+        if (pickerOpen) {
             if (contactsGranted) {
                 item {
                     OutlinedTextField(
@@ -508,8 +511,8 @@ enum class ScopeOption(val label: String) {
          * being open. Deliberately independent of the persisted policy — opening SELECTED
          * from UNSET/FULL/EMPTY must still load contacts, or the picker deadlocks empty.
          */
-        fun pickerLoads(granted: Boolean, uiOption: ScopeOption?): Boolean =
-            ContactsAccess.mayQuery(granted, uiOption == SELECTED)
+        fun pickerLoads(granted: Boolean, pickerOpen: Boolean): Boolean =
+            ContactsAccess.mayQuery(granted, pickerOpen)
 
         fun fromPolicy(state: PolicyState?): ScopeOption? = when (state) {
             is PolicyState.Configured -> when (state.scope) {

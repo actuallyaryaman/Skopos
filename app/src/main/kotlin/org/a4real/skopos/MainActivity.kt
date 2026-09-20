@@ -204,6 +204,10 @@ class MainActivity : ComponentActivity() {
         // latch so the poll below resyncs the display from the store.
         var option by remember { mutableStateOf<ScopeOption?>(null) }
         var userChose by remember { mutableStateOf(false) }
+        // Transient editing state, independent of the durable policy: the picker stays open
+        // across polls and failed writes, and closes only on an explicit mode change,
+        // reset, or navigation. The poll below never touches it.
+        var pickerOpen by remember { mutableStateOf(false) }
         var vectorActive by remember { mutableStateOf<Boolean?>(null) }
         var vectorPending by remember { mutableStateOf(false) }
         var contactsGranted by remember { mutableStateOf(false) }
@@ -223,7 +227,7 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(tick) {
             // Capture UI state on the main thread; the IO block below must not read it.
-            val uiOption = option
+            val open = pickerOpen
             val loaded = withContext(Dispatchers.IO) {
                 val isConnected = repository.connected
                 val state = repository.currentPolicy()
@@ -233,7 +237,7 @@ class MainActivity : ComponentActivity() {
                 val granted = hasReadContactsPermission()
                 val opt = ScopeOption.fromPolicy(state)
                 var loadFailed = false
-                val list = if (ScopeOption.pickerLoads(granted, uiOption)) {
+                val list = if (ScopeOption.pickerLoads(granted, open)) {
                     try {
                         repository.deviceContacts()
                     } catch (_: Throwable) {
@@ -280,6 +284,7 @@ class MainActivity : ComponentActivity() {
             vectorActive = vectorActive,
             vectorRequestPending = vectorPending,
             option = option,
+            pickerOpen = pickerOpen,
             selectedKeys = selectedKeys,
             contacts = contacts,
             contactsError = contactsError,
@@ -298,6 +303,7 @@ class MainActivity : ComponentActivity() {
                         if (ok) {
                             option = ScopeOption.FULL
                             userChose = true
+                            pickerOpen = false
                             feedback = "Scope published to the daemon."
                         } else {
                             userChose = false
@@ -312,6 +318,7 @@ class MainActivity : ComponentActivity() {
                         if (ok) {
                             option = ScopeOption.EMPTY
                             userChose = true
+                            pickerOpen = false
                             feedback = "Scope published to the daemon."
                         } else {
                             userChose = false
@@ -327,9 +334,12 @@ class MainActivity : ComponentActivity() {
                         // Opening the picker is navigation only: it must never publish
                         // (in particular never ContactScope.from(emptySet()) == EMPTY).
                         // A SELECTED policy persists exclusively via contact toggles.
+                        // Toggle writes below never touch pickerOpen, so even a failed
+                        // write leaves the picker open on the durable (unchanged) state.
                         PickerPolicy.PickerOpenAction.OpenPicker -> {
                             option = ScopeOption.SELECTED
                             userChose = true
+                            pickerOpen = true
                             feedback = "Choose contacts to publish a selection."
                             tick++
                         }
@@ -361,6 +371,7 @@ class MainActivity : ComponentActivity() {
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) { repository.resetPolicy() }
                     userChose = false
+                    if (ok) pickerOpen = false
                     feedback = if (ok) "Policy cleared — native behavior."
                     else "Daemon not connected — not cleared."
                     tick++

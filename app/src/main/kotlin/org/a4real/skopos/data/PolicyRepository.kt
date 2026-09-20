@@ -7,7 +7,6 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import io.github.libxposed.service.XposedService
-import io.github.libxposed.service.XposedServiceHelper
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.SkoposContract
@@ -30,25 +29,18 @@ class PolicyRepository private constructor(
     private val appContext = context.applicationContext
     private val markerResolver = appContext.contentResolver
 
-    @Volatile
-    private var service: XposedService? = null
-
     init {
-        XposedServiceHelper.registerListener(
-            object : XposedServiceHelper.OnServiceListener {
-                override fun onServiceBind(xposedService: XposedService) {
-                    service = xposedService
-                }
-
-                override fun onServiceDied(xposedService: XposedService) {
-                    if (service === xposedService) service = null
-                }
-            },
-        )
+        // Shared process-wide connection: exactly one XposedServiceHelper listener exists
+        // per process (last registration wins), so repositories must never register their
+        // own — they only read the shared service.
+        DaemonConnection.ensure()
     }
 
+    private val service: XposedService?
+        get() = DaemonConnection.service
+
     val connected: Boolean
-        get() = service != null
+        get() = DaemonConnection.connected
 
     private fun group() = SkoposContract.policyGroupFor(targetPackage)
 

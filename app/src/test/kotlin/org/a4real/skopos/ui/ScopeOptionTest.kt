@@ -11,14 +11,14 @@ import org.junit.Test
 class ScopeOptionTest {
 
     @Test
-    fun `picker loads on UI tab regardless of stored policy`() {
+    fun `picker loads on picker-open state regardless of stored policy`() {
         // Regression: the load gate once used the stored scope, deadlocking the picker
-        // empty when opening SELECTED from UNSET/FULL/EMPTY.
-        assertTrue(ScopeOption.pickerLoads(granted = true, uiOption = ScopeOption.SELECTED))
-        assertFalse(ScopeOption.pickerLoads(granted = true, uiOption = ScopeOption.FULL))
-        assertFalse(ScopeOption.pickerLoads(granted = true, uiOption = ScopeOption.EMPTY))
-        assertFalse(ScopeOption.pickerLoads(granted = true, uiOption = null))
-        assertFalse(ScopeOption.pickerLoads(granted = false, uiOption = ScopeOption.SELECTED))
+        // empty when opening SELECTED from UNSET/FULL/EMPTY. The gate now follows the
+        // transient picker-open state, so the stored policy must not influence it.
+        assertTrue(ScopeOption.pickerLoads(granted = true, pickerOpen = true))
+        assertFalse(ScopeOption.pickerLoads(granted = true, pickerOpen = false))
+        assertFalse(ScopeOption.pickerLoads(granted = false, pickerOpen = true))
+        assertFalse(ScopeOption.pickerLoads(granted = false, pickerOpen = false))
     }
 
     @Test
