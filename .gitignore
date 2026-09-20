@@ -1,0 +1,26 @@
+# Machine-local, per-developer values live here (sdk.dir, etc.).
+local.properties
+
+# Gradle
+.gradle/
+**/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.kotlin/
+
+# Signing material must never be committed.
+*.jks
+*.keystore
+
+# Build outputs.
+*.apk
+*.aab
+*.ap_
+
+# OS noise
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/

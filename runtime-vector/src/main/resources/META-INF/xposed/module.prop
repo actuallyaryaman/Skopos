@@ -1,0 +1,7 @@
+id=org.a4real.skopos.runtime
+name=Skopos Runtime
+version=0.1
+author=Skopos
+description=M0 Vector runtime spike: harmless probe hook in the Skopos test app
+minApiVersion=101
+targetApiVersion=102
