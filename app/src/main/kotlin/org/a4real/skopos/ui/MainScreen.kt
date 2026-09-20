@@ -52,6 +52,10 @@ fun AppListScreen(
     onShowSystemChange: (Boolean) -> Unit,
     rows: List<AppRow>,
     feedback: String,
+    manualInput: String,
+    onManualInputChange: (String) -> Unit,
+    manualError: String?,
+    onManualSubmit: () -> Unit,
     onOpenApp: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -82,7 +86,7 @@ fun AppListScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = showSystem, onCheckedChange = onShowSystemChange)
                 Text(
-                    text = "Show system apps",
+                    text = "Show system apps (launchable)",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -111,6 +115,13 @@ fun AppListScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (row.unverified) {
+                                Text(
+                                    text = "Package visibility unavailable — configuration can still be saved.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -121,6 +132,27 @@ fun AppListScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            OutlinedTextField(
+                value = manualInput,
+                onValueChange = onManualInputChange,
+                label = { Text("Add package name manually") },
+                placeholder = { Text("com.example.app") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (manualError != null) {
+                Text(
+                    text = manualError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = onManualSubmit) { Text("Add package") }
+            }
             Text(
                 text = if (connected) "daemon connected" else "daemon disconnected",
                 style = MaterialTheme.typography.labelSmall,

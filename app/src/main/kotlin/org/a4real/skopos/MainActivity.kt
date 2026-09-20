@@ -109,8 +109,15 @@ class MainActivity : ComponentActivity() {
         var showSystem by remember { mutableStateOf(false) }
         var rows by remember { mutableStateOf(emptyList<AppRow>()) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
+        var manualInput by remember { mutableStateOf("") }
+        var manualError by remember { mutableStateOf<String?>(null) }
+        var manualPackages by remember { mutableStateOf(emptySet<String>()) }
 
         LaunchedEffect(tick) {
+            // Capture UI state on the main thread; the IO block below must not read it.
+            val manual = manualPackages
+            val system = showSystem
+            val q = query
             val result = withContext(Dispatchers.IO) {
                 // Connectivity probe: the daemon service is shared, so any repo instance
                 // reports the same bound state.
@@ -120,28 +127,19 @@ class MainActivity : ComponentActivity() {
                     probe.vectorScope() ?: emptyList()
                 } else emptyList()
                 val discovered = AppDiscovery.launchableApps(this@MainActivity)
-                val candidates = (scopePkgs + discovered.map { it.packageName }).distinct()
-                val byPkg = discovered.associateBy { it.packageName }
-                val listRows = candidates.mapNotNull { candidate ->
-                    val info = byPkg[candidate]
-                    val label = info?.label ?: candidate
-                    val policy = if (isConnected) {
-                        repoFor(candidate).currentPolicy()
-                    } else null
-                    AppRow(
-                        packageName = candidate,
-                        label = label,
-                        declaresReadContacts = info?.declaresReadContacts == true,
-                        isSystem = info?.isSystem == true,
-                        vectorActive = if (isConnected) candidate in scopePkgs else null,
-                        policy = policy,
-                    )
-                }.filter { showSystem || !it.isSystem }
-                    .filter {
-                        query.isBlank() ||
-                            it.label.contains(query, ignoreCase = true) ||
-                            it.packageName.contains(query, ignoreCase = true)
-                    }
+                val listRows = AppDiscovery.assembleRows(
+                    scopePackages = if (isConnected) scopePkgs else null,
+                    discovered = discovered,
+                    manualPackages = manual,
+                    showSystem = system,
+                    policyFor = { pkg ->
+                        if (isConnected) repoFor(pkg).currentPolicy() else null
+                    },
+                ).filter {
+                    q.isBlank() ||
+                        it.label.contains(q, ignoreCase = true) ||
+                        it.packageName.contains(q, ignoreCase = true)
+                }
                 Triple(isConnected, listRows, scopePkgs.size)
             }
             connected = result.first
@@ -169,6 +167,23 @@ class MainActivity : ComponentActivity() {
             onShowSystemChange = { showSystem = it },
             rows = rows,
             feedback = feedback,
+            manualInput = manualInput,
+            onManualInputChange = {
+                manualInput = it
+                manualError = null
+            },
+            manualError = manualError,
+            onManualSubmit = {
+                val pkg = manualInput.trim()
+                if (!AppDiscovery.isValidPackageName(pkg)) {
+                    manualError = "Not a valid package name (e.g. com.example.app)."
+                } else {
+                    manualPackages = manualPackages + pkg
+                    manualInput = ""
+                    manualError = null
+                    tick++
+                }
+            },
             onOpenApp = onOpenApp,
             onRefresh = { tick++ },
         )
