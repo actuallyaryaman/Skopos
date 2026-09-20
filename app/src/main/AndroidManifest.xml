@@ -3,6 +3,14 @@
 
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- Launchable-app visibility for scope discovery (no QUERY_ALL_PACKAGES). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:label="Skopos"
         android:supportsRtl="true"

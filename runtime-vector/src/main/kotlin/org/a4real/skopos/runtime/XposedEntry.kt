@@ -38,6 +38,8 @@ class XposedEntry : XposedModule() {
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (isDenied(param.packageName)) return
+        // M0/M2 development probe: strictly test-app only, never part of production behavior.
         if (param.packageName != SkoposContract.TEST_PACKAGE) return
         resolvedLog("target package accepted in ${param.packageName}")
 
@@ -64,14 +66,17 @@ class XposedEntry : XposedModule() {
      * contacts query.
      */
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.packageName != SkoposContract.TEST_PACKAGE) return
+        val targetPackage = param.packageName
+        if (isDenied(targetPackage)) return
         if (!installed.compareAndSet(false, true)) return
 
         resolvedLog("hook registration started")
 
+        val resolvers: () -> android.content.ContentResolver? = { currentApplication()?.contentResolver }
         val policy = PolicyCache(
-            PrefsPolicySource(getRemotePreferences(SkoposContract.POLICY_GROUP)),
+            PrefsPolicySource(getRemotePreferences(SkoposContract.policyGroupFor(targetPackage))),
             { currentApplication()?.contentResolver?.let(::AppPolicyResolver) },
+            PolicyObserver.starter(resolvers),
         )
         ContactsInterceptor(this, policy).install(param.classLoader)
 
@@ -89,8 +94,15 @@ class XposedEntry : XposedModule() {
         resolvedLog("ContactsInterceptor installed")
     }
 
-    private fun currentApplication(): android.app.Application? = try {
-        Class.forName("android.app.ActivityThread")
+    /**
+     * Production denial set: system_server (`android`) must never be hooked, and Skopos must
+     * never intercept itself even if mis-scoped. Every other Vector-injected package may
+     * receive Contact Scope interception; production behavior never depends on the probe.
+     */
+    private fun isDenied(packageName: String): Boolean =
+        packageName == "android" || packageName == SkoposContract.MODULE_PACKAGE
+
+    private fun currentApplication(): android.app.Application? = try {        Class.forName("android.app.ActivityThread")
             .getMethod("currentApplication")
             .invoke(null) as? android.app.Application
     } catch (e: Throwable) {

@@ -50,7 +50,7 @@ class ScopeConstraintTest {
         val longs = Regex("\\d+").findAll(fragment).map { it.value.toLong() }.toList()
         assertEquals(ids, longs.toSet())
         assertEquals("three chunks", 3, fragment.split(" OR ").size)
-        assertTrue("no chunk exceeds cap", fragment.split(" OR ").map { it.count { c -> c == ',' } + (if (it.contains('(')) 1 else 0) }.max()!! <= ScopeConstraint.MAX_IN_LIST)
+        assertTrue("no chunk exceeds cap", fragment.split(" OR ").maxOf { it.count { c -> c == ',' } + (if (it.contains('(')) 1 else 0) } <= ScopeConstraint.MAX_IN_LIST)
     }
 
     @Test

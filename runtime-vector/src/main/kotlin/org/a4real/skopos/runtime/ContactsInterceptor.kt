@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.ContactsContract.PhoneLookup
 import io.github.libxposed.api.XposedInterface
 import org.a4real.skopos.core.ContactScope
+import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.ScopeConstraint
 import org.a4real.skopos.core.ScopeFamily
 import java.util.concurrent.CopyOnWriteArraySet
@@ -71,10 +72,17 @@ internal class ContactsInterceptor(
             // Resume deferred policy initialization: ...
             policy.ensureInitialized()
             val snapshot = policy.current()
+            val scope = when (val state = snapshot.state) {
+                // No policy configured: native provider behavior, no rewriting.
+                is PolicyState.Unset -> return@withGuard chain.proceed()
+                // Malformed stored value: fail closed as empty.
+                is PolicyState.Corrupt -> ContactScope.Empty
+                is PolicyState.Configured -> state.scope
+            }
 
             when (family) {
                 ScopeFamily.PHONE_LOOKUP -> {
-                    if (snapshot.scope is ContactScope.Full) {
+                    if (scope is ContactScope.Full) {
                         return@withGuard chain.proceed()
                     }
                     // PhoneLookup rows carry the aggregate contact id; inject it into the
@@ -90,7 +98,7 @@ internal class ContactsInterceptor(
                     }
                 }
 
-                else -> rewriteSelection(family, snapshot, args)?.let { merged ->
+                else -> rewriteSelection(family, scope, snapshot.allowedIds, args)?.let { merged ->
                     val next = ArrayList<Any?>(args.size)
                     args.indices.forEach {
                         next += if (it == merged.first) merged.second else args[it]
@@ -104,10 +112,11 @@ internal class ContactsInterceptor(
     /** Returns the (argIndex, newValue) pair to swap, or null when the merge is a no-op. */
     private fun rewriteSelection(
         family: ScopeFamily,
-        snapshot: PolicyCache.Snapshot,
+        scope: ContactScope,
+        allowedIds: Set<Long>,
         args: List<Any?>,
     ): Pair<Int, Any?>? {
-        val constraint = ScopeConstraint.constraint(family, snapshot.scope, snapshot.allowedIds)
+        val constraint = ScopeConstraint.constraint(family, scope, allowedIds)
             ?: return null
         if (constraint.isEmpty()) return null
 

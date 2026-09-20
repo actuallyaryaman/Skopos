@@ -10,6 +10,8 @@ import org.a4real.skopos.core.SkoposContract
 internal class PrefsPolicySource(private val prefs: SharedPreferences) : PolicySource {
     override fun encoded(): String? = prefs.getString(SkoposContract.POLICY_KEY, null)
 
+    override fun contains(): Boolean = prefs.contains(SkoposContract.POLICY_KEY)
+
     override fun onChanged(handler: () -> Unit) {
         prefs.registerOnSharedPreferenceChangeListener { _, key ->
             if (key == SkoposContract.POLICY_KEY) handler()

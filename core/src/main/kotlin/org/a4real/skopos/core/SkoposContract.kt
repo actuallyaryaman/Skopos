@@ -9,6 +9,7 @@ package org.a4real.skopos.core
  */
 object SkoposContract {
     const val TEST_PACKAGE = "org.a4real.skopos.test"
+    const val MODULE_PACKAGE = "org.a4real.skopos"
     const val PROBE_CLASS = "$TEST_PACKAGE.SkoposProbe"
     const val PROBE_METHOD = "value"
     const val ORIGINAL_RESULT = "Skopos test: original"
@@ -22,6 +23,13 @@ object SkoposContract {
      */
     const val POLICY_GROUP = TEST_PACKAGE
     const val POLICY_KEY = "contact_scope"
+
+    /**
+     * Per-target policy group: the RemotePreferences group is the target package name itself,
+     * so each injected app reads exactly its own policy slot. The M2 group already equals the
+     * test package name, so the validated test path is unchanged by this scheme.
+     */
+    fun policyGroupFor(packageName: String): String = packageName
 
     /** Device names of the deterministic marker contacts the manager lists and the test app seeds. */
     val MARKER_NAMES = listOf("Skopos Alice", "Skopos Bob", "Skopos Carol")
