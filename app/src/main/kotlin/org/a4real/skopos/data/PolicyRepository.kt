@@ -1,8 +1,11 @@
 package org.a4real.skopos.data
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.core.content.ContextCompat
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import org.a4real.skopos.core.ContactScope
@@ -19,7 +22,8 @@ import org.a4real.skopos.core.SkoposContract
  */
 class PolicyRepository private constructor(context: Context) {
 
-    private val markerResolver = context.applicationContext.contentResolver
+    private val appContext = context.applicationContext
+    private val markerResolver = appContext.contentResolver
 
     @Volatile
     private var service: XposedService? = null
@@ -59,28 +63,40 @@ class PolicyRepository private constructor(context: Context) {
     /**
      * The deterministic marker contacts the test app seeds (matching on display name is safe
      * here: this is a test-only contact store on a validation device).
+     *
+     * This is the only provider query the manager ever makes, and it must not run without
+     * READ_CONTACTS. The permission check is the gate; the [runCatching] guard is defensive
+     * only, so an unexpected provider failure never crashes the manager.
      */
     fun markerContacts(): List<MarkerContact> {
-        val markers = mutableListOf<MarkerContact>()
-        markerResolver.query(
-            ContactsQuery.URI,
-            ContactsQuery.PROJECTION,
-            "${ContactsContract.Contacts.DISPLAY_NAME} IN (${SkoposContract.MARKER_NAMES.joinToString(",") { "?" }} )",
-            SkoposContract.MARKER_NAMES.toTypedArray(),
-            "${ContactsContract.Contacts.DISPLAY_NAME} ASC",
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                markers.add(
-                    MarkerContact(
-                        id = cursor.getLong(ContactsQuery._ID),
-                        lookupKey = cursor.getString(ContactsQuery.LOOKUP_KEY),
-                        displayName = cursor.getString(ContactsQuery.NAME) ?: "",
-                    ),
-                )
+        if (!hasReadContactsPermission) return emptyList()
+        return runCatching {
+            val markers = mutableListOf<MarkerContact>()
+            markerResolver.query(
+                ContactsQuery.URI,
+                ContactsQuery.PROJECTION,
+                "${ContactsContract.Contacts.DISPLAY_NAME} IN (${SkoposContract.MARKER_NAMES.joinToString(",") { "?" }} )",
+                SkoposContract.MARKER_NAMES.toTypedArray(),
+                "${ContactsContract.Contacts.DISPLAY_NAME} ASC",
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    markers.add(
+                        MarkerContact(
+                            id = cursor.getLong(ContactsQuery._ID),
+                            lookupKey = cursor.getString(ContactsQuery.LOOKUP_KEY),
+                            displayName = cursor.getString(ContactsQuery.NAME) ?: "",
+                        ),
+                    )
+                }
             }
-        }
-        return markers
+            markers
+        }.getOrDefault(emptyList())
     }
+
+    private val hasReadContactsPermission: Boolean
+        get() = ContextCompat.checkSelfPermission(
+            appContext, Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
 
     data class MarkerContact(val id: Long, val lookupKey: String, val displayName: String)
 

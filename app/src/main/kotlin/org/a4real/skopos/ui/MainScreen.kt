@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -21,33 +22,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.a4real.skopos.core.ContactScope
+import org.a4real.skopos.data.ContactsAccess
+import org.a4real.skopos.data.ContactsRetry
 import org.a4real.skopos.data.PolicyRepository.MarkerContact
 import org.a4real.skopos.ui.theme.ThemeMode
 
 /**
- * The manager surface: connection state, the authoritative scope, and the picker that writes
- * it. A SELECTED scope with an empty subset is never produced — the empty selection collapses
- * to [ContactScope.Empty], which the checkbox section simply keeps visible until the user's
- * next explicit choice.
+ * The manager surface: connection state, the mode the user has chosen, and — when that mode
+ * is SELECTED — either the marker picker (READ_CONTACTS granted) or a small pane explaining
+ * that contact access is needed, with a retry/settings control.
+ *
+ * The picker never converts the published policy on its own: FULL/EMPTY are published when
+ * chosen, SELECTED is entered locally and only persists once a marker is toggled.
  */
 @Composable
 fun MainScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     connected: Boolean,
-    scope: ContactScope?,
+    option: ScopeOption,
+    selectedKeys: Set<String>,
     markers: List<MarkerContact>,
+    contactsGranted: Boolean,
+    deniedPermanently: Boolean,
     feedback: String,
-    onPublish: (ContactScope) -> Unit,
+    onChooseOption: (ScopeOption) -> Unit,
+    onToggleMarker: (String, Boolean) -> Unit,
+    onRetryAccess: () -> Unit,
     onRefresh: () -> Unit,
 ) {
-    val selectedKeys = (scope as? ContactScope.Selected)?.lookupKeys ?: emptySet()
-    val option = when (scope) {
-        is ContactScope.Full -> ScopeOption.FULL
-        is ContactScope.Selected -> ScopeOption.SELECTED
-        else -> ScopeOption.EMPTY
-    }
-
     Scaffold { innerPadding ->
         Column(
             modifier = Modifier
@@ -67,11 +70,15 @@ fun MainScreen(
 
             ScopeSection(
                 connected = connected,
-                scope = scope,
+                option = option,
                 selectedKeys = selectedKeys,
                 markers = markers,
+                contactsGranted = contactsGranted,
+                deniedPermanently = deniedPermanently,
                 feedback = feedback,
-                onPublish = onPublish,
+                onChooseOption = onChooseOption,
+                onToggleMarker = onToggleMarker,
+                onRetryAccess = onRetryAccess,
                 onRefresh = onRefresh,
             )
 
@@ -89,19 +96,17 @@ fun MainScreen(
 @Composable
 private fun ScopeSection(
     connected: Boolean,
-    scope: ContactScope?,
+    option: ScopeOption,
     selectedKeys: Set<String>,
     markers: List<MarkerContact>,
+    contactsGranted: Boolean,
+    deniedPermanently: Boolean,
     feedback: String,
-    onPublish: (ContactScope) -> Unit,
+    onChooseOption: (ScopeOption) -> Unit,
+    onToggleMarker: (String, Boolean) -> Unit,
+    onRetryAccess: () -> Unit,
     onRefresh: () -> Unit,
 ) {
-    val option = when (scope) {
-        is ContactScope.Full -> ScopeOption.FULL
-        is ContactScope.Selected -> ScopeOption.SELECTED
-        else -> ScopeOption.EMPTY
-    }
-
     Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -112,7 +117,7 @@ private fun ScopeSection(
                 ScopeOption.entries.forEachIndexed { index, entry ->
                     SegmentedButton(
                         selected = entry == option,
-                        onClick = { onPublish(entry.intoScope(null)) },
+                        onClick = { onChooseOption(entry) },
                         shape = SegmentedButtonDefaults.itemShape(
                             index = index,
                             count = ScopeOption.entries.size,
@@ -122,23 +127,44 @@ private fun ScopeSection(
             }
 
             if (option == ScopeOption.SELECTED) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    markers.forEach { marker ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = marker.lookupKey in selectedKeys,
-                                onCheckedChange = { checked ->
-                                    val next =
-                                        if (checked) selectedKeys + marker.lookupKey
-                                        else selectedKeys - marker.lookupKey
-                                    onPublish(ContactScope.from(next))
-                                },
+                if (contactsGranted) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (markers.isEmpty()) {
+                            Text(
+                                text = "No marker contacts found on this device.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Text(marker.displayName, style = MaterialTheme.typography.bodyMedium)
                         }
+                        markers.forEach { marker ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = marker.lookupKey in selectedKeys,
+                                    onCheckedChange = { checked ->
+                                        onToggleMarker(marker.lookupKey, checked)
+                                    },
+                                )
+                                Text(marker.displayName, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Contacts access is needed to choose contacts.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    val retry = ContactsAccess.retry(deniedPermanently)
+                    Button(onClick = onRetryAccess) { Text(retry.label) }
+                    if (retry == ContactsRetry.OPEN_SETTINGS) {
+                        Text(
+                            text = "Permission is turned off for this app. Open settings to enable it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -210,9 +236,11 @@ enum class ScopeOption(val label: String) {
     EMPTY("No contacts"),
     SELECTED("Only selected");
 
-    fun intoScope(selectedKeys: Set<String>?): ContactScope = when (this) {
-        FULL -> ContactScope.Full
-        EMPTY -> ContactScope.Empty
-        SELECTED -> ContactScope.from(selectedKeys ?: emptySet())
+    companion object {
+        fun from(scope: ContactScope?): ScopeOption = when (scope) {
+            is ContactScope.Full -> FULL
+            is ContactScope.Selected -> SELECTED
+            else -> EMPTY
+        }
     }
 }
