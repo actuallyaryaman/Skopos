@@ -1,5 +1,6 @@
 package org.a4real.skopos.data
 
+import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 
 /**
@@ -23,4 +24,15 @@ object PickerPolicy {
      */
     fun decideOpenSelected(hasPermission: Boolean, stored: PolicyState?): PickerOpenAction =
         if (!hasPermission) PickerOpenAction.RequestPermission else PickerOpenAction.OpenPicker
+
+    /**
+     * One-shot picker restore on detail entry: open the picker exactly when the first
+     * successful read for this session reports a persisted non-empty SELECTED scope.
+     * UNSET/FULL/EMPTY/Corrupt/absent never open it; later polls must not re-drive it
+     * (the caller gates on a once-per-session flag), so a user-closed picker stays closed.
+     */
+    fun shouldAutoOpenPicker(policy: PolicyState?): Boolean {
+        val scope = (policy as? PolicyState.Configured)?.scope as? ContactScope.Selected
+        return scope != null && scope.lookupKeys.isNotEmpty()
+    }
 }

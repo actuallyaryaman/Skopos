@@ -214,6 +214,11 @@ class MainActivity : ComponentActivity() {
         var deniedPermanently by remember { mutableStateOf(false) }
         var contacts by remember { mutableStateOf(emptyList<PolicyRepository.DeviceContact>()) }
         var contactsError by remember { mutableStateOf(false) }
+        // One-shot restore: the first successful read carrying a persisted non-empty
+        // SELECTED scope opens the picker so the stored selection is immediately visible
+        // and editable. Never writes, never re-fires: after this flag is set, polls and
+        // user actions own pickerOpen exclusively.
+        var pickerInitDone by remember { mutableStateOf(false) }
         var search by remember { mutableStateOf("") }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
 
@@ -260,6 +265,12 @@ class MainActivity : ComponentActivity() {
             // Selection and picker rows always follow the durable store, never local edits.
             contacts = loaded.contacts
             contactsError = loaded.loadFailed
+            if (!pickerInitDone && loaded.policy != null) {
+                pickerInitDone = true
+                if (PickerPolicy.shouldAutoOpenPicker(loaded.policy)) {
+                    pickerOpen = true
+                }
+            }
         }
         LaunchedEffect(Unit) {
             while (true) {

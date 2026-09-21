@@ -3,6 +3,8 @@ package org.a4real.skopos.data
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickerPolicyTest {
@@ -35,5 +37,27 @@ class PickerPolicyTest {
                 PickerPolicy.decideOpenSelected(hasPermission = false, stored = stored),
             )
         }
+    }
+
+    @Test
+    fun `persisted non-empty SELECTED auto-opens picker once`() {
+        assertTrue(
+            PickerPolicy.shouldAutoOpenPicker(
+                PolicyState.Configured(ContactScope.Selected(setOf("k1"))),
+            ),
+        )
+    }
+
+    @Test
+    fun `UNSET FULL EMPTY corrupt and absent never auto-open`() {
+        assertFalse(PickerPolicy.shouldAutoOpenPicker(PolicyState.Unset))
+        assertFalse(
+            PickerPolicy.shouldAutoOpenPicker(PolicyState.Configured(ContactScope.Full)),
+        )
+        assertFalse(
+            PickerPolicy.shouldAutoOpenPicker(PolicyState.Configured(ContactScope.Empty)),
+        )
+        assertFalse(PickerPolicy.shouldAutoOpenPicker(PolicyState.Corrupt))
+        assertFalse(PickerPolicy.shouldAutoOpenPicker(null))
     }
 }
