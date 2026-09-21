@@ -242,4 +242,65 @@ class AppDiscoveryTest {
         assertTrue(assemble(discovered, showSystem = false).isEmpty())
         assertEquals(listOf("com.sys"), assemble(discovered, showSystem = true))
     }
+
+    @Test
+    fun `rows available while daemon enrichment absent`() {
+        val rows = AppDiscovery.assembleRows(
+            scopePackages = null,
+            discovered = listOf(entry("com.a")),
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+        )
+        assertEquals(1, rows.size)
+        assertEquals(null, rows[0].vectorActive)
+        assertEquals(null, rows[0].policy)
+        assertEquals("com.a", rows[0].label)
+    }
+
+    @Test
+    fun `enrichment promotes row without discarding local fields`() {
+        val discovered = listOf(entry("com.a"))
+        val bare = AppDiscovery.assembleRows(
+            scopePackages = null,
+            discovered = discovered,
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+        )
+        val enriched = AppDiscovery.assembleRows(
+            scopePackages = listOf("com.a"),
+            discovered = discovered,
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { PolicyState.Configured(ContactScope.Selected(setOf("k"))) },
+        )
+        assertEquals("com.a", bare[0].label)
+        assertEquals("com.a", enriched[0].label)
+        assertEquals(true, enriched[0].vectorActive)
+        assertEquals(
+            PolicyState.Configured(ContactScope.Selected(setOf("k"))),
+            enriched[0].policy,
+        )
+        val (managed, _) = AppDiscovery.groupApps(enriched)
+        assertEquals(listOf("com.a"), managed.map { it.packageName })
+    }
+
+    @Test
+    fun `unknown daemon state is not classified as unmanaged-configured`() {
+        val (managed, other) = AppDiscovery.groupApps(
+            listOf(
+                AppRow(
+                    packageName = "com.a",
+                    label = "A",
+                    declaresReadContacts = true,
+                    isSystem = false,
+                    vectorActive = null,
+                    policy = null,
+                ),
+            ),
+        )
+        assertTrue(managed.isEmpty())
+        assertEquals(listOf("com.a"), other.map { it.packageName })
+    }
 }

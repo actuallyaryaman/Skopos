@@ -29,3 +29,29 @@ internal sealed interface Route {
 
 /** Top-level bottom-navigation destinations. */
 internal enum class BottomTab { HOME, SETTINGS }
+
+/** Page-transition classification; explicit so sealed-class order never implies direction. */
+internal enum class TransitionKind { TOP_LEVEL, FORWARD, BACKWARD }
+
+private fun Route.rank(): Int = when (this) {
+    is Route.Home, is Route.Settings -> 0
+    is Route.ContactsApps, is Route.AdvancedSettings -> 1
+    is Route.Detail -> 2
+}
+
+/**
+ * Classifies a route change. Home<->Settings is a lateral tab switch (fade only);
+ * anything else follows hierarchy depth. Same-rank, same-screen pairs fall back to fade.
+ */
+internal fun transitionKind(from: Route, to: Route): TransitionKind {
+    val homeSettingsPair =
+        (from is Route.Home && to is Route.Settings) ||
+            (from is Route.Settings && to is Route.Home)
+    if (homeSettingsPair) return TransitionKind.TOP_LEVEL
+    val delta = to.rank() - from.rank()
+    return when {
+        delta > 0 -> TransitionKind.FORWARD
+        delta < 0 -> TransitionKind.BACKWARD
+        else -> TransitionKind.TOP_LEVEL
+    }
+}

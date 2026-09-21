@@ -13,6 +13,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,6 +33,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.libxposed.service.XposedService
@@ -48,6 +62,8 @@ import org.a4real.skopos.ui.ManagerBottomBar
 import org.a4real.skopos.ui.Route
 import org.a4real.skopos.ui.ScopeOption
 import org.a4real.skopos.ui.SettingsScreen
+import org.a4real.skopos.ui.TransitionKind
+import org.a4real.skopos.ui.transitionKind
 import org.a4real.skopos.ui.theme.SkoposTheme
 import org.a4real.skopos.ui.theme.ThemeMode
 
@@ -87,26 +103,32 @@ class MainActivity : ComponentActivity() {
             var manualError by remember { mutableStateOf<String?>(null) }
 
             SkoposTheme(themeMode = themeMode) {
-                // Single bottom-bar instance shared by top-level screens; drill-down
-                // screens (ContactsApps, Detail, AdvancedSettings) use back navigation.
-                val bottomBar: @Composable () -> Unit = {
-                    val tab = route.bottomTab()
-                    if (tab != null) {
-                        ManagerBottomBar(
-                            current = tab,
-                            onSelect = {
-                                route = when (it) {
-                                    BottomTab.HOME -> Route.Home
-                                    BottomTab.SETTINGS -> Route.Settings
-                                }
-                            },
-                        )
-                    }
-                }
-                when (val current = route) {
+                // Page content animates per route; the bottom bar is a stationary overlay
+                // outside the animation so it never slides with pages.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AnimatedContent(
+                        targetState = route,
+                        transitionSpec = {
+                            when (transitionKind(initialState, targetState)) {
+                                TransitionKind.FORWARD ->
+                                    (slideInHorizontally(tween(200)) { it / 4 } +
+                                        fadeIn(tween(200))) togetherWith
+                                        (slideOutHorizontally(tween(200)) { -it / 4 } +
+                                            fadeOut(tween(200)))
+                                TransitionKind.BACKWARD ->
+                                    (slideInHorizontally(tween(200)) { -it / 4 } +
+                                        fadeIn(tween(200))) togetherWith
+                                        (slideOutHorizontally(tween(200)) { it / 4 } +
+                                            fadeOut(tween(200)))
+                                TransitionKind.TOP_LEVEL ->
+                                    fadeIn(tween(180)) togetherWith fadeOut(tween(180))
+                            }
+                        },
+                        label = "route",
+                    ) { current ->
+                        when (current) {
                     is Route.Home -> HomeScreen(
                         onOpenContacts = { route = Route.ContactsApps },
-                        bottomBar = bottomBar,
                     )
                     is Route.ContactsApps -> {
                         BackHandler { route = Route.Home }
@@ -135,7 +157,6 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenAdvanced = { route = Route.AdvancedSettings },
                             onBack = { route = Route.Home },
-                            bottomBar = bottomBar,
                         )
                     }
                     is Route.AdvancedSettings -> {
@@ -160,6 +181,28 @@ class MainActivity : ComponentActivity() {
                             onBack = { route = Route.Settings },
                         )
                     }
+                    }
+                    }
+                    val tab = route.bottomTab()
+                    if (tab != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .navigationBarsPadding()
+                                .padding(bottom = 12.dp),
+                            contentAlignment = Alignment.BottomCenter,
+                        ) {
+                            ManagerBottomBar(
+                                current = tab,
+                                onSelect = {
+                                    route = when (it) {
+                                        BottomTab.HOME -> Route.Home
+                                        BottomTab.SETTINGS -> Route.Settings
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -173,61 +216,77 @@ class MainActivity : ComponentActivity() {
     ) {
         val scope = rememberCoroutineScope()
         var tick by remember { mutableIntStateOf(0) }
+        var inventoryTick by remember { mutableIntStateOf(0) }
         var connected by remember { mutableStateOf(false) }
         var query by remember { mutableStateOf("") }
         var showSystem by remember { mutableStateOf(false) }
-        var rawRows by remember { mutableStateOf(emptyList<AppRow>()) }
+        var rawEntries by remember { mutableStateOf(emptyList<AppDiscovery.AppEntry>()) }
+        var enrichment by remember { mutableStateOf<Enrichment?>(null) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
 
-        LaunchedEffect(tick, manualPackages) {
+        // Local inventory: PackageManager only, no daemon touch. Runs on entry, on
+        // manual-package change, and on explicit Refresh — never on the 5 s tick.
+        LaunchedEffect(manualPackages, inventoryTick) {
+            rawEntries = withContext(Dispatchers.IO) {
+                AppDiscovery.discoverAppsForPermission(
+                    this@MainActivity,
+                    android.Manifest.permission.READ_CONTACTS,
+                )
+            }
+        }
+
+        // Daemon enrichment: scope + per-package policies merged by package name. Never
+        // reruns PackageManager discovery; a missing/slow daemon leaves local rows intact.
+        LaunchedEffect(tick) {
             // Capture UI state on the main thread; the IO block below must not read it.
             val manual = manualPackages
-            val system = showSystem
+            val known = rawEntries.map { it.packageName }
             val result = withContext(Dispatchers.IO) {
                 // Connectivity probe: the daemon service is shared, so any repo instance
                 // reports the same bound state.
                 val probe = repoFor(SkoposContract.TEST_PACKAGE)
                 val isConnected = probe.connected
-                val scopePkgs = if (isConnected) {
-                    probe.vectorScope() ?: emptyList()
-                } else emptyList()
-                val discovered = AppDiscovery.discoverAppsForPermission(
-                    this@MainActivity,
-                    android.Manifest.permission.READ_CONTACTS,
-                )
-                val listRows = AppDiscovery.assembleRows(
-                    scopePackages = if (isConnected) scopePkgs else null,
-                    discovered = discovered,
-                    manualPackages = manual,
-                    showSystem = system,
-                    policyFor = { pkg ->
-                        if (isConnected) repoFor(pkg).currentPolicy() else null
-                    },
-                )
-                Triple(isConnected, listRows, scopePkgs.size)
+                if (!isConnected) {
+                    Enrichment(connected = false, scopePackages = null, policies = emptyMap())
+                } else {
+                    val scopePkgs = probe.vectorScope() ?: emptyList()
+                    val policies = ((scopePkgs + known + manual.toList()).distinct()).associateWith { pkg ->
+                        runCatching { repoFor(pkg).currentPolicy() }.getOrNull()
+                    }
+                    Enrichment(connected = true, scopePackages = scopePkgs, policies = policies)
+                }
             }
-            connected = result.first
-            rawRows = result.second
-            feedback = if (result.first) {
-                "${result.second.size} apps · ${result.third} in Vector scope."
+            connected = result.connected
+            enrichment = result
+            feedback = if (result.connected) {
+                "${rawEntries.size} apps · ${result.scopePackages?.size ?: 0} in Vector scope."
             } else {
                 "Daemon not connected — showing discovery only."
             }
         }
+
+        // Pure in-memory merge + filter + grouping: every keystroke updates immediately
+        // with zero provider/daemon work. SearchQuery import already present.
+        val rows = remember(rawEntries, manualPackages, enrichment, showSystem) {
+            AppDiscovery.assembleRows(
+                scopePackages = enrichment?.scopePackages,
+                discovered = rawEntries,
+                manualPackages = manualPackages,
+                showSystem = showSystem,
+                policyFor = { pkg -> enrichment?.policies?.get(pkg) },
+            )
+        }
+        val visible = remember(query, rows) {
+            rows.filter { SearchQuery.matches(query, it.label, it.packageName) }
+        }
+        val managed = remember(visible) { AppDiscovery.groupApps(visible).first }
+        val other = remember(visible) { AppDiscovery.groupApps(visible).second }
         LaunchedEffect(Unit) {
             while (true) {
                 delay(5000)
                 tick++
             }
         }
-
-        // Pure in-memory filter + grouping: every keystroke updates immediately with
-        // zero provider/daemon work. SearchQuery import already present.
-        val visible = remember(query, rawRows) {
-            rawRows.filter { SearchQuery.matches(query, it.label, it.packageName) }
-        }
-        val managed = remember(visible) { AppDiscovery.groupApps(visible).first }
-        val other = remember(visible) { AppDiscovery.groupApps(visible).second }
 
         AppListScreen(
             connected = connected,
@@ -239,10 +298,20 @@ class MainActivity : ComponentActivity() {
             other = other,
             feedback = feedback,
             onOpenApp = onOpenApp,
-            onRefresh = { tick++ },
+            onRefresh = {
+                tick++
+                inventoryTick++
+            },
             onBack = onBack,
         )
     }
+
+    /** Daemon-side enrichment merged onto local inventory by package name. */
+    private data class Enrichment(
+        val connected: Boolean,
+        val scopePackages: List<String>?,
+        val policies: Map<String, PolicyState?>,
+    )
 
     @Composable
     private fun AppDetail(

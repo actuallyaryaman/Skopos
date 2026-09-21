@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,9 +59,8 @@ import org.a4real.skopos.ui.theme.ThemeMode
 @Composable
 fun HomeScreen(
     onOpenContacts: () -> Unit,
-    bottomBar: @Composable () -> Unit = {},
 ) {
-    Scaffold(bottomBar = bottomBar) { innerPadding ->
+    Scaffold { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -98,6 +99,8 @@ fun HomeScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Clearance for the stationary overlay bottom bar on top-level routes.
+            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 }
@@ -108,9 +111,8 @@ fun SettingsScreen(
     onThemeModeChange: (ThemeMode) -> Unit,
     onOpenAdvanced: () -> Unit,
     onBack: () -> Unit,
-    bottomBar: @Composable () -> Unit = {},
 ) {
-    Scaffold(bottomBar = bottomBar) { innerPadding ->
+    Scaffold { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -207,6 +209,8 @@ fun AdvancedSettingsScreen(
                 )
             }
             OutlinedButton(onClick = onManualSubmit) { Text("Add package") }
+            // Clearance for the stationary overlay bottom bar on top-level routes.
+            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 }
@@ -391,6 +395,8 @@ private fun AppIcon(
 
 private fun appStatusLine(row: AppRow, connected: Boolean): String {
     if (!connected) return "daemon unreachable"
+    // Never enriched: unknown, not a verdict. Stays quiet instead of claiming a state.
+    if (row.vectorActive == null && row.policy == null) return "Checking Skopos…"
     val vector = when (row.vectorActive) {
         true -> "Vector active"
         false -> "Vector inactive"
@@ -403,7 +409,8 @@ private fun appStatusLine(row: AppRow, connected: Boolean): String {
             is ContactScope.Selected -> "scope: ${scope.lookupKeys.size} selected"
         }
         is PolicyState.Corrupt -> "scope: unreadable (fail-closed)"
-        is PolicyState.Unset, null -> "scope: not configured"
+        is PolicyState.Unset -> "scope: not configured"
+        null -> "scope: unknown"
     }
     // Declaration is proven by the manifest; grant state is metadata only, never a filter.
     val access = if (!row.declaresReadContacts) "" else when (row.readContactsGranted) {
