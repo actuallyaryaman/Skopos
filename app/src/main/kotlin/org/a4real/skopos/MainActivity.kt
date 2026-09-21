@@ -104,7 +104,6 @@ class MainActivity : ComponentActivity() {
                 when (val current = route) {
                     is Route.Home -> HomeScreen(
                         onOpenContacts = { route = Route.ContactsApps },
-                        onOpenSettings = { route = Route.Settings },
                         bottomBar = bottomBar,
                     )
                     is Route.ContactsApps -> {

@@ -55,7 +55,6 @@ import org.a4real.skopos.ui.theme.ThemeMode
 @Composable
 fun HomeScreen(
     onOpenContacts: () -> Unit,
-    onOpenSettings: () -> Unit,
     bottomBar: @Composable () -> Unit = {},
 ) {
     Scaffold(bottomBar = bottomBar) { innerPadding ->
@@ -89,23 +88,6 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-            }
-
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenSettings() },
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(text = "⚙", style = MaterialTheme.typography.titleMedium)
-                    Text(text = "Settings", style = MaterialTheme.typography.titleMedium)
                 }
             }
 
