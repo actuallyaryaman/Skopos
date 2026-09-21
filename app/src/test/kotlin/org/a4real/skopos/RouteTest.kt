@@ -71,8 +71,15 @@ class RouteTest {
     }
 
     @Test
-    fun `home settings switch is top-level fade`() {
-        assertEquals(TransitionKind.TOP_LEVEL, transitionKind(Route.Home, Route.Settings))
-        assertEquals(TransitionKind.TOP_LEVEL, transitionKind(Route.Settings, Route.Home))
+    fun `home settings switch slides directionally`() {
+        assertEquals(TransitionKind.TOP_LEVEL_RIGHT, transitionKind(Route.Home, Route.Settings))
+        assertEquals(TransitionKind.TOP_LEVEL_LEFT, transitionKind(Route.Settings, Route.Home))
+    }
+
+    @Test
+    fun `about drills forward from settings`() {
+        assertEquals(TransitionKind.FORWARD, transitionKind(Route.Settings, Route.About))
+        assertEquals(TransitionKind.BACKWARD, transitionKind(Route.About, Route.Settings))
+        assertNull(Route.About.bottomTab())
     }
 }

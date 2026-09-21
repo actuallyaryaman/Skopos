@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -46,6 +47,8 @@ import kotlinx.coroutines.withContext
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.SkoposContract
+import org.a4real.skopos.data.AboutLinks
+import org.a4real.skopos.data.AboutMetadata
 import org.a4real.skopos.data.AppDiscovery
 import org.a4real.skopos.data.AppLaunch
 import org.a4real.skopos.data.AppRow
@@ -54,6 +57,7 @@ import org.a4real.skopos.data.PolicyRepository
 import org.a4real.skopos.data.SearchQuery
 import org.a4real.skopos.data.ThemePreferences
 import org.a4real.skopos.ui.AdvancedSettingsScreen
+import org.a4real.skopos.ui.AboutScreen
 import org.a4real.skopos.ui.AppDetailScreen
 import org.a4real.skopos.ui.AppListScreen
 import org.a4real.skopos.ui.BottomTab
@@ -95,6 +99,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val themeMode by themePreferences.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
+            val dynamicColors by themePreferences.dynamicColors.collectAsStateWithLifecycle(true)
             val scope = rememberCoroutineScope()
             var route by remember { mutableStateOf<Route>(Route.Home) }
             // Manual packages live above list and Settings so both screens share them.
@@ -102,7 +107,7 @@ class MainActivity : ComponentActivity() {
             var manualInput by remember { mutableStateOf("") }
             var manualError by remember { mutableStateOf<String?>(null) }
 
-            SkoposTheme(themeMode = themeMode) {
+            SkoposTheme(themeMode = themeMode, dynamicColors = dynamicColors) {
                 // Page content animates per route; the bottom bar is a stationary overlay
                 // outside the animation so it never slides with pages.
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -119,6 +124,16 @@ class MainActivity : ComponentActivity() {
                                     (slideInHorizontally(tween(200)) { -it / 4 } +
                                         fadeIn(tween(200))) togetherWith
                                         (slideOutHorizontally(tween(200)) { it / 4 } +
+                                            fadeOut(tween(200)))
+                                TransitionKind.TOP_LEVEL_RIGHT ->
+                                    (slideInHorizontally(tween(200)) { it / 7 } +
+                                        fadeIn(tween(200))) togetherWith
+                                        (slideOutHorizontally(tween(200)) { -it / 7 } +
+                                            fadeOut(tween(200)))
+                                TransitionKind.TOP_LEVEL_LEFT ->
+                                    (slideInHorizontally(tween(200)) { -it / 7 } +
+                                        fadeIn(tween(200))) togetherWith
+                                        (slideOutHorizontally(tween(200)) { it / 7 } +
                                             fadeOut(tween(200)))
                                 TransitionKind.TOP_LEVEL ->
                                     fadeIn(tween(180)) togetherWith fadeOut(tween(180))
@@ -155,8 +170,28 @@ class MainActivity : ComponentActivity() {
                             onThemeModeChange = { mode ->
                                 scope.launch { themePreferences.setThemeMode(mode) }
                             },
+                            dynamicColors = dynamicColors,
+                            onDynamicColorsChange = { enabled ->
+                                scope.launch { themePreferences.setDynamicColors(enabled) }
+                            },
                             onOpenAdvanced = { route = Route.AdvancedSettings },
-                            onBack = { route = Route.Home },
+                            onOpenAbout = { route = Route.About },
+                        )
+                    }
+                    is Route.About -> {
+                        BackHandler { route = Route.Settings }
+                        AboutScreen(
+                            metadata = AboutMetadata.load(packageManager, packageName),
+                            onOpenUrl = { url ->
+                                if (!AboutLinks.open(this@MainActivity, url)) {
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Could not open link.",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                            onBack = { route = Route.Settings },
                         )
                     }
                     is Route.AdvancedSettings -> {

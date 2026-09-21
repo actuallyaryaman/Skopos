@@ -15,7 +15,32 @@ android {
         versionName = "0.1"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    // Private About-screen metadata (`.local/skopos-about.txt`, never committed).
+    // Missing file or fields degrade to empty strings; the UI hides blank rows.
+    val aboutMetadata: Map<String, String> = run {
+        val file = rootProject.file(".local/skopos-about.txt")
+        if (!file.isFile) return@run emptyMap()
+        file.readLines()
+            .mapNotNull { line ->
+                val key = line.substringBefore("=").trim()
+                if (key.isEmpty() || !line.contains("=")) null
+                else key to line.substringAfter("=").trim()
+            }.toMap()
+    }
+    fun about(key: String): String = aboutMetadata[key].orEmpty().replace("\"", "")
+    defaultConfig {
+        buildConfigField("String", "SKOPOS_DEVELOPER_NAME", "\"${about("DEVELOPER_NAME")}\"")
+        buildConfigField("String", "SKOPOS_DEVELOPER_HANDLE", "\"${about("DEVELOPER_HANDLE")}\"")
+        buildConfigField("String", "SKOPOS_PROJECT_DESCRIPTION", "\"${about("PROJECT_DESCRIPTION")}\"")
+        buildConfigField("String", "SKOPOS_PROJECT_URL", "\"${about("PROJECT_URL")}\"")
+        buildConfigField("String", "SKOPOS_BUG_REPORT_URL", "\"${about("BUG_REPORT_URL")}\"")
+        buildConfigField("String", "SKOPOS_LICENSE_NAME", "\"${about("LICENSE_NAME")}\"")
+    }
 }
 
 dependencies {

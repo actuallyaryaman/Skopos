@@ -28,6 +28,29 @@ private val DarkScheme = darkColorScheme(
 )
 
 /**
+ * Pure effective-scheme decision, host-testable without framework dynamic-color APIs.
+ */
+internal enum class SchemeKind { DYNAMIC_DARK, DYNAMIC_LIGHT, STATIC_DARK, STATIC_LIGHT }
+
+internal fun resolveScheme(
+    themeMode: ThemeMode,
+    dynamicOn: Boolean,
+    systemDark: Boolean,
+): SchemeKind {
+    val dark = when (themeMode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+    return when {
+        dynamicOn && dark -> SchemeKind.DYNAMIC_DARK
+        dynamicOn -> SchemeKind.DYNAMIC_LIGHT
+        dark -> SchemeKind.STATIC_DARK
+        else -> SchemeKind.STATIC_LIGHT
+    }
+}
+
+/**
  * The Material 3 Expressive surface is still an alpha API in the 1.5.0-alpha line
  * (same stack as the ../Vector reference build); the opt-in stays confined to this
  * single composable. On Android 12+ the wallpaper drives dynamic colours, with the
@@ -35,21 +58,19 @@ private val DarkScheme = darkColorScheme(
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SkoposTheme(themeMode: ThemeMode, content: @Composable () -> Unit) {
-    val dark =
-        when (themeMode) {
-            ThemeMode.SYSTEM -> isSystemInDarkTheme()
-            ThemeMode.LIGHT -> false
-            ThemeMode.DARK -> true
-        }
-
+fun SkoposTheme(
+    themeMode: ThemeMode,
+    dynamicColors: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     val context = LocalContext.current
-    val colorScheme =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        } else {
-            if (dark) DarkScheme else LightScheme
-        }
+    val colorScheme = when (resolveScheme(themeMode, dynamicColors, isSystemInDarkTheme())) {
+        // minSdk is 36, so dynamic schemes need no compatibility branch below API 31.
+        SchemeKind.DYNAMIC_DARK -> dynamicDarkColorScheme(context)
+        SchemeKind.DYNAMIC_LIGHT -> dynamicLightColorScheme(context)
+        SchemeKind.STATIC_DARK -> DarkScheme
+        SchemeKind.STATIC_LIGHT -> LightScheme
+    }
 
     MaterialExpressiveTheme(
         colorScheme = colorScheme,

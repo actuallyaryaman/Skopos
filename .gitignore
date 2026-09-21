@@ -24,3 +24,5 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+# Private per-developer project metadata (never committed).
+.local/

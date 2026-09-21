@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,12 +28,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -40,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
+import org.a4real.skopos.data.AboutMetadata
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.ContactsAccess
 import org.a4real.skopos.data.ContactsRetry
@@ -109,8 +114,10 @@ fun HomeScreen(
 fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    dynamicColors: Boolean,
+    onDynamicColorsChange: (Boolean) -> Unit,
     onOpenAdvanced: () -> Unit,
-    onBack: () -> Unit,
+    onOpenAbout: () -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -120,12 +127,6 @@ fun SettingsScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = "← Privacy controls",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable { onBack() },
-            )
             Text(text = "Settings", style = MaterialTheme.typography.headlineLarge)
 
             Text(
@@ -133,6 +134,17 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleMedium,
             )
             ThemeSection(themeMode = themeMode, onChange = onThemeModeChange)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Dynamic colors",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Switch(checked = dynamicColors, onCheckedChange = onDynamicColorsChange)
+            }
 
             Text(
                 text = "Advanced",
@@ -154,6 +166,158 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            Text(
+                text = "About",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenAbout() },
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Info,
+                        contentDescription = null,
+                    )
+                    Column {
+                        Text(text = "About Skopos", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "Version, developer, and project links.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AboutScreen(
+    metadata: AboutMetadata,
+    onOpenUrl: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "← Settings",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onBack() },
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Skopos", style = MaterialTheme.typography.headlineLarge)
+                val versionLine = buildString {
+                    if (metadata.versionName.isNotBlank()) append("Version ${metadata.versionName}")
+                    if (metadata.versionCode > 0) {
+                        if (isNotEmpty()) append("  ·  ")
+                        append("build ${metadata.versionCode}")
+                    }
+                }
+                if (versionLine.isNotBlank()) {
+                    Text(
+                        text = versionLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (metadata.projectDescription.isNotBlank()) {
+                Text(
+                    text = metadata.projectDescription,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (metadata.developerName.isNotBlank() || metadata.developerHandle.isNotBlank()) {
+                Text(
+                    text = "Developer",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (metadata.developerName.isNotBlank()) {
+                    Text(
+                        text = metadata.developerName,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                if (metadata.developerHandle.isNotBlank()) {
+                    Text(
+                        text = metadata.developerHandle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (metadata.projectUrl.isNotBlank() || metadata.bugReportUrl.isNotBlank()) {
+                Text(
+                    text = "Project",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            if (metadata.projectUrl.isNotBlank()) {
+                LinkRow(label = "Project source", onClick = { onOpenUrl(metadata.projectUrl) })
+            }
+            if (metadata.bugReportUrl.isNotBlank()) {
+                LinkRow(label = "Report a bug", onClick = { onOpenUrl(metadata.bugReportUrl) })
+            }
+
+            if (metadata.licenseName.isNotBlank()) {
+                Text(
+                    text = "Legal",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = metadata.licenseName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinkRow(label: String, onClick: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Filled.OpenInNew,
+                contentDescription = null,
+            )
         }
     }
 }

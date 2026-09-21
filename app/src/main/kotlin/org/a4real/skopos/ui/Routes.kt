@@ -9,6 +9,7 @@ internal sealed interface Route {
     data class Detail(val entry: AppRow) : Route
     data object Settings : Route
     data object AdvancedSettings : Route
+    data object About : Route
 
     /** System-back target, or null to leave the activity. */
     fun back(): Route? = when (this) {
@@ -17,6 +18,7 @@ internal sealed interface Route {
         is Detail -> ContactsApps
         is Settings -> Home
         is AdvancedSettings -> Settings
+        is About -> Settings
     }
 
     /** Bottom-bar tab shown for this route, or null on drill-down screens. */
@@ -31,23 +33,32 @@ internal sealed interface Route {
 internal enum class BottomTab { HOME, SETTINGS }
 
 /** Page-transition classification; explicit so sealed-class order never implies direction. */
-internal enum class TransitionKind { TOP_LEVEL, FORWARD, BACKWARD }
+internal enum class TransitionKind {
+    /** Lateral top-level fade (same-rank fallback). */
+    TOP_LEVEL,
+
+    /** Top-level lateral slide, incoming content enters from the right. */
+    TOP_LEVEL_RIGHT,
+
+    /** Top-level lateral slide, incoming content enters from the left. */
+    TOP_LEVEL_LEFT,
+    FORWARD,
+    BACKWARD,
+}
 
 private fun Route.rank(): Int = when (this) {
     is Route.Home, is Route.Settings -> 0
-    is Route.ContactsApps, is Route.AdvancedSettings -> 1
+    is Route.ContactsApps, is Route.AdvancedSettings, is Route.About -> 1
     is Route.Detail -> 2
 }
 
 /**
- * Classifies a route change. Home<->Settings is a lateral tab switch (fade only);
- * anything else follows hierarchy depth. Same-rank, same-screen pairs fall back to fade.
+ * Classifies a route change. Home<->Settings slides laterally (directional); anything
+ * else follows hierarchy depth; same-rank leftovers fade.
  */
 internal fun transitionKind(from: Route, to: Route): TransitionKind {
-    val homeSettingsPair =
-        (from is Route.Home && to is Route.Settings) ||
-            (from is Route.Settings && to is Route.Home)
-    if (homeSettingsPair) return TransitionKind.TOP_LEVEL
+    if (from is Route.Home && to is Route.Settings) return TransitionKind.TOP_LEVEL_RIGHT
+    if (from is Route.Settings && to is Route.Home) return TransitionKind.TOP_LEVEL_LEFT
     val delta = to.rank() - from.rank()
     return when {
         delta > 0 -> TransitionKind.FORWARD
