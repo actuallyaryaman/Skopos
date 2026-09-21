@@ -440,6 +440,9 @@ fun AppDetailScreen(
     onRefresh: () -> Unit,
     onReset: () -> Unit,
     onRemoveFromScope: () -> Unit,
+    onForceStop: () -> Unit,
+    hasLaunchIntent: Boolean,
+    onOpenApp: () -> Unit,
     onRequestVectorScope: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -485,6 +488,13 @@ fun AppDetailScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        if (hasLaunchIntent) {
+            item {
+                OutlinedButton(onClick = onOpenApp, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open app")
+                }
             }
         }
 
@@ -542,6 +552,7 @@ fun AppDetailScreen(
             AdvancedSection(
                 onReset = onReset,
                 onRemoveFromScope = onRemoveFromScope,
+                onForceStop = onForceStop,
             )
         }
 
@@ -740,6 +751,7 @@ private fun ScopeTabs(
 private fun AdvancedSection(
     onReset: () -> Unit,
     onRemoveFromScope: () -> Unit,
+    onForceStop: () -> Unit,
 ) {
     Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
         Column(
@@ -762,6 +774,18 @@ private fun AdvancedSection(
             Text(
                 text = "Removing scope keeps the saved contact policy; enforcement simply stops. " +
                     "Re-adding the app later restores it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Force stop app",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.clickable { onForceStop() },
+            )
+            Text(
+                text = "Use if the app appears to retain stale state. Needs root; " +
+                    "never runs automatically.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

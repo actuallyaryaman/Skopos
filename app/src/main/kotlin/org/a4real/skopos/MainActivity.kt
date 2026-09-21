@@ -2,6 +2,7 @@ package org.a4real.skopos
 
 import android.Manifest
 import android.content.Intent
+import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -32,6 +33,7 @@ import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.SkoposContract
 import org.a4real.skopos.data.AppDiscovery
+import org.a4real.skopos.data.AppActions
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository
@@ -275,6 +277,9 @@ class MainActivity : ComponentActivity() {
         // user actions own pickerOpen exclusively.
         var pickerInitDone by remember { mutableStateOf(false) }
         var search by remember { mutableStateOf("") }
+        // Launchability resolves once per detail session off the poll path; null means
+        // not yet resolved, false hides the Open action.
+        var hasLaunchIntent by remember { mutableStateOf<Boolean?>(null) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
 
         val permissionLauncher = rememberLauncherForActivityResult(
@@ -337,6 +342,11 @@ class MainActivity : ComponentActivity() {
                 if (PickerPolicy.shouldAutoOpenPicker(loaded.policy)) {
                     pickerOpen = true
                 }
+            }
+        }
+        LaunchedEffect(Unit) {
+            hasLaunchIntent = withContext(Dispatchers.IO) {
+                AppActions.launchSenderOrNull(packageManager, targetPackage) != null
             }
         }
         LaunchedEffect(Unit) {
@@ -482,6 +492,35 @@ class MainActivity : ComponentActivity() {
                     feedback = if (ok) "Removed from Skopos scope. Saved contact policy was kept."
                     else "Daemon not connected — still in scope."
                     tick++
+                }
+            },
+            onForceStop = {
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        AppActions.forceStopViaRoot(targetPackage)
+                    }
+                    feedback = when (result) {
+                        is AppActions.ForceStopResult.Success -> "App force-stopped."
+                        is AppActions.ForceStopResult.RootUnavailable ->
+                            "Could not force-stop app. Root access was unavailable or denied."
+                        is AppActions.ForceStopResult.Denied ->
+                            "Could not force-stop app (exit ${result.exitCode})."
+                        is AppActions.ForceStopResult.Timeout -> "Force-stop timed out."
+                        is AppActions.ForceStopResult.Failed -> "Could not force-stop app."
+                    }
+                }
+            },
+            hasLaunchIntent = hasLaunchIntent == true,
+            onOpenApp = {
+                val sender = AppActions.launchSenderOrNull(packageManager, targetPackage)
+                if (sender == null) {
+                    feedback = "Could not open app."
+                } else {
+                    try {
+                        sender.sendIntent(this@MainActivity, 0, null, null, null)
+                    } catch (_: IntentSender.SendIntentException) {
+                        feedback = "Could not open app."
+                    }
                 }
             },
             onRequestVectorScope = {
