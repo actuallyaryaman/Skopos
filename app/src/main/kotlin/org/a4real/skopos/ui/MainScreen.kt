@@ -30,6 +30,7 @@ import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.ContactsAccess
 import org.a4real.skopos.data.ContactsRetry
+import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository.DeviceContact
 import org.a4real.skopos.ui.theme.ThemeMode
 
@@ -204,6 +205,7 @@ fun AppDetailScreen(
     option: ScopeOption?,
     pickerOpen: Boolean,
     selectedKeys: Set<String>,
+    resolvedIds: Set<Long>,
     contacts: List<DeviceContact>,
     contactsError: Boolean,
     staleCount: Int,
@@ -338,7 +340,12 @@ fun AppDetailScreen(
                 items(shown, key = { it.lookupKey }) { contact ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
-                            checked = contact.lookupKey in selectedKeys,
+                            checked = PickerPolicy.isRowChecked(
+                                contact.lookupKey,
+                                contact.id,
+                                selectedKeys,
+                                resolvedIds,
+                            ),
                             onCheckedChange = { checked ->
                                 onToggleContact(contact.lookupKey, checked)
                             },

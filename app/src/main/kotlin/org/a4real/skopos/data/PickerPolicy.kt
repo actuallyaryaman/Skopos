@@ -26,6 +26,39 @@ object PickerPolicy {
         if (!hasPermission) PickerOpenAction.RequestPermission else PickerOpenAction.OpenPicker
 
     /**
+     * Whether a picker row shows checked: its current lookup key is persisted, or its current
+     * aggregate id was durably resolved from a persisted (possibly since-changed) key. The
+     * second clause keeps a selected row checked across aggregate recreation.
+     */
+    fun isRowChecked(
+        rowKey: String,
+        rowId: Long,
+        selectedKeys: Set<String>,
+        resolvedIds: Set<Long>,
+    ): Boolean = rowKey in selectedKeys || rowId in resolvedIds
+
+    /**
+     * Persisted keys after toggling a row: unchecking drops the row's own key plus any
+     * persisted keys resolving to the same row (covers key-changed selections); checking
+     * normalizes to the row's current key so no duplicates accumulate. Never invents state.
+     */
+    fun toggledKeys(
+        selectedKeys: Set<String>,
+        rowKey: String,
+        rowId: Long?,
+        resolved: Map<String, Long?>,
+        checking: Boolean,
+    ): Set<String> {
+        val covered = buildSet {
+            if (rowKey in selectedKeys) add(rowKey)
+            if (rowId != null) {
+                for ((persisted, id) in resolved) if (id == rowId) add(persisted)
+            }
+        }
+        return if (checking) selectedKeys - covered + rowKey else selectedKeys - covered - rowKey
+    }
+
+    /**
      * One-shot picker restore on detail entry: open the picker exactly when the first
      * successful read for this session reports a persisted non-empty SELECTED scope.
      * UNSET/FULL/EMPTY/Corrupt/absent never open it; later polls must not re-drive it

@@ -1,9 +1,9 @@
 package org.a4real.skopos.runtime
 
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.SharedPreferences
 import android.provider.ContactsContract
-import org.a4real.skopos.core.ScopeConstraint
 import org.a4real.skopos.core.SkoposContract
 
 /** [PolicySource] over the injected process's RemotePreferences snapshot. */
@@ -25,18 +25,20 @@ internal class AppPolicyResolver(private val resolver: ContentResolver) : Policy
         if (lookupKeys.isEmpty()) return emptySet()
         val ids = mutableSetOf<Long>()
         Reentrancy.withGuard {
-            lookupKeys.chunked(ScopeConstraint.MAX_IN_LIST).forEach { chunk ->
-                val placeholders = chunk.joinToString(",") { "?" }
-                resolver.query(
-                    ContactsContract.Contacts.CONTENT_URI,
-                    arrayOf(ContactsContract.Contacts._ID),
-                    "${ContactsContract.Contacts.LOOKUP_KEY} IN ($placeholders)",
-                    chunk.toTypedArray(),
-                    null,
-                )?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        ids.add(cursor.getLong(0))
-                    }
+            // Durable per-key resolution: the provider's lookup path (exact key, then the
+            // key's constituent raw-contact ids) survives aggregate recreation after edits,
+            // merges and splits, where raw LOOKUP_KEY equality would miss. Unresolvable keys
+            // are skipped individually so one bad key never drops the whole selection.
+            lookupKeys.forEach { key ->
+                runCatching {
+                    if (key.isEmpty()) return@forEach
+                    val lookupUri = ContactsContract.Contacts.CONTENT_LOOKUP_URI
+                        .buildUpon()
+                        .appendPath(key)
+                        .build()
+                    val current = ContactsContract.Contacts.lookupContact(resolver, lookupUri)
+                        ?: return@forEach
+                    ids.add(ContentUris.parseId(current))
                 }
             }
         }

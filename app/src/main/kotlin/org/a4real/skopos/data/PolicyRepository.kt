@@ -1,6 +1,7 @@
 package org.a4real.skopos.data
 
 import android.Manifest
+import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -159,27 +160,28 @@ class PolicyRepository private constructor(
     }
 
     /**
-     * How many of [lookupKeys] still resolve against the provider. Reported in the picker so
-     * stale selections are visible instead of silently changing policy.
+     * Durably resolves each persisted lookup key to its current aggregate id using the
+     * provider's lookup path (exact key, then the key's constituent raw-contact ids), which
+     * survives aggregate recreation after edits, merges and splits where raw LOOKUP_KEY
+     * equality would miss. Returns null per key that does not resolve (deleted or
+     * mid-aggregation); no permission or empty input yields an empty map.
      */
-    fun resolvableCount(lookupKeys: Set<String>): Int {
-        if (!hasReadContactsPermission || lookupKeys.isEmpty()) return 0
+    fun resolveSelectedKeys(lookupKeys: Set<String>): Map<String, Long?> {
+        if (!hasReadContactsPermission || lookupKeys.isEmpty()) return emptyMap()
+        return lookupKeys.associateWith { key -> resolveKey(key) }
+    }
+
+    private fun resolveKey(lookupKey: String): Long? {
+        if (lookupKey.isEmpty()) return null
         return runCatching {
-            var count = 0
-            lookupKeys.chunked(500).forEach { chunk ->
-                val placeholders = chunk.joinToString(",") { "?" }
-                markerResolver.query(
-                    ContactsContract.Contacts.CONTENT_URI,
-                    arrayOf(ContactsContract.Contacts._ID),
-                    "${ContactsContract.Contacts.LOOKUP_KEY} IN ($placeholders)",
-                    chunk.toTypedArray(),
-                    null,
-                )?.use { cursor ->
-                    while (cursor.moveToNext()) count++
-                }
-            }
-            count
-        }.getOrDefault(0)
+            val lookupUri = ContactsContract.Contacts.CONTENT_LOOKUP_URI
+                .buildUpon()
+                .appendPath(lookupKey)
+                .build()
+            val current = ContactsContract.Contacts.lookupContact(markerResolver, lookupUri)
+                ?: return@runCatching null
+            ContentUris.parseId(current)
+        }.getOrNull()
     }
 
     private fun phonesFor(contactIds: List<Long>): Map<Long, String> {

@@ -214,6 +214,9 @@ class MainActivity : ComponentActivity() {
         var deniedPermanently by remember { mutableStateOf(false) }
         var contacts by remember { mutableStateOf(emptyList<PolicyRepository.DeviceContact>()) }
         var contactsError by remember { mutableStateOf(false) }
+        // Durable resolution of persisted keys to current aggregate ids; empty when the
+        // picker is closed, permission is missing, or nothing is selected.
+        var resolved by remember { mutableStateOf(emptyMap<String, Long?>()) }
         // One-shot restore: the first successful read carrying a persisted non-empty
         // SELECTED scope opens the picker so the stored selection is immediately visible
         // and editable. Never writes, never re-fires: after this flag is set, polls and
@@ -233,6 +236,9 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(tick) {
             // Capture UI state on the main thread; the IO block below must not read it.
             val open = pickerOpen
+            val keysSnapshot =
+                (policy as? PolicyState.Configured)?.scope?.let { it as? ContactScope.Selected }
+                    ?.lookupKeys ?: emptySet()
             val loaded = withContext(Dispatchers.IO) {
                 val isConnected = repository.connected
                 val state = repository.currentPolicy()
@@ -250,7 +256,11 @@ class MainActivity : ComponentActivity() {
                         emptyList()
                     }
                 } else emptyList()
-                LoadedDetail(isConnected, state, active, granted, opt, list, loadFailed)
+                val resolvedNow =
+                    if (granted && keysSnapshot.isNotEmpty()) {
+                        repository.resolveSelectedKeys(keysSnapshot)
+                    } else emptyMap()
+                LoadedDetail(isConnected, state, active, granted, opt, list, loadFailed, resolvedNow)
             }
             connected = loaded.connected
             policy = loaded.policy
@@ -265,6 +275,7 @@ class MainActivity : ComponentActivity() {
             // Selection and picker rows always follow the durable store, never local edits.
             contacts = loaded.contacts
             contactsError = loaded.loadFailed
+            resolved = loaded.resolved
             if (!pickerInitDone && loaded.policy != null) {
                 pickerInitDone = true
                 if (PickerPolicy.shouldAutoOpenPicker(loaded.policy)) {
@@ -281,8 +292,14 @@ class MainActivity : ComponentActivity() {
 
         val selectedKeys = (policy as? PolicyState.Configured)
             ?.scope?.let { it as? ContactScope.Selected }?.lookupKeys ?: emptySet()
-        val staleCount = if (selectedKeys.isEmpty() || contacts.isEmpty()) 0
-        else selectedKeys.count { key -> contacts.none { it.lookupKey == key } }
+        // Durably resolved current ids for the persisted keys; a row counts checked when
+        // its current key is stored or its id was resolved from a stored (possibly
+        // since-changed) key. Stale means absent from visible rows AND unresolvable.
+        val resolvedIds = resolved.values.filterNotNull().toSet()
+        val staleCount = if (!contactsGranted || selectedKeys.isEmpty()) 0
+        else selectedKeys.count { key ->
+            contacts.none { it.lookupKey == key } && resolved[key] == null
+        }
         val corrupt = policy is PolicyState.Corrupt
 
         // Device rows keyed by durable lookup key; used only for display/selection identity.
@@ -297,6 +314,7 @@ class MainActivity : ComponentActivity() {
             option = option,
             pickerOpen = pickerOpen,
             selectedKeys = selectedKeys,
+            resolvedIds = resolvedIds,
             contacts = contacts,
             contactsError = contactsError,
             staleCount = staleCount,
@@ -359,7 +377,12 @@ class MainActivity : ComponentActivity() {
             },
             onToggleContact = { key, checked ->
                 scope.launch {
-                    val next = if (checked) selectedKeys + key else selectedKeys - key
+                    // Map the tapped row back to persisted keys: its own key plus any
+                    // persisted keys resolving to the same row (covers key-changed
+                    // selections), so unchecking removes the durable entry and checking
+                    // normalizes to the current key without duplicates.
+                    val rowId = contacts.singleOrNull { it.lookupKey == key }?.id
+                    val next = PickerPolicy.toggledKeys(selectedKeys, key, rowId, resolved, checked)
                     val published = ContactScope.from(next)
                     val ok = withContext(Dispatchers.IO) { repository.writeScope(published) }
                     if (ok) {
@@ -427,5 +450,6 @@ class MainActivity : ComponentActivity() {
         val option: ScopeOption?,
         val contacts: List<PolicyRepository.DeviceContact>,
         val loadFailed: Boolean,
+        val resolved: Map<String, Long?>,
     )
 }

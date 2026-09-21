@@ -60,4 +60,61 @@ class PickerPolicyTest {
         assertFalse(PickerPolicy.shouldAutoOpenPicker(PolicyState.Corrupt))
         assertFalse(PickerPolicy.shouldAutoOpenPicker(null))
     }
+
+    @Test
+    fun `row checked by persisted key or resolved id`() {
+        assertTrue(PickerPolicy.isRowChecked("k1", 7L, setOf("k1"), emptySet()))
+        assertTrue(PickerPolicy.isRowChecked("k2", 7L, setOf("k1"), setOf(7L)))
+        assertFalse(PickerPolicy.isRowChecked("k2", 8L, setOf("k1"), setOf(7L)))
+        assertFalse(PickerPolicy.isRowChecked("k2", 8L, emptySet(), emptySet()))
+    }
+
+    @Test
+    fun `unchecking drops own key plus persisted keys covering the row`() {
+        assertEquals(
+            emptySet<String>(),
+            PickerPolicy.toggledKeys(
+                selectedKeys = setOf("k1"),
+                rowKey = "k1",
+                rowId = 7L,
+                resolved = mapOf("k1" to 7L),
+                checking = false,
+            ),
+        )
+        // Key changed since persisting: unchecking the resolved row removes the old key.
+        assertEquals(
+            emptySet<String>(),
+            PickerPolicy.toggledKeys(
+                selectedKeys = setOf("kOld"),
+                rowKey = "kNew",
+                rowId = 7L,
+                resolved = mapOf("kOld" to 7L),
+                checking = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `checking normalizes to the current row key without duplicates`() {
+        assertEquals(
+            setOf("kNew"),
+            PickerPolicy.toggledKeys(
+                selectedKeys = setOf("kOld"),
+                rowKey = "kNew",
+                rowId = 7L,
+                resolved = mapOf("kOld" to 7L),
+                checking = true,
+            ),
+        )
+        assertEquals(
+            setOf("k1", "k2"),
+            PickerPolicy.toggledKeys(
+                selectedKeys = setOf("k1"),
+                rowKey = "k2",
+                rowId = 8L,
+                resolved = mapOf("k1" to 7L),
+                checking = true,
+            ),
+        )
+    }
 }

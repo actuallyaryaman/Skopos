@@ -26,7 +26,10 @@ internal fun interface ObserverHandle {
  *  - a lazily created single-thread [ScheduledExecutorService] provides debounce delay plus
  *    serialization (one refresh at a time) in a single primitive — no permanent HandlerThread
  *    in processes that never select into SELECTED, and none held after leaving it;
- *  - [stop] unregisters, cancels the pending run and shuts the executor down without awaiting,
+ *  - after each debounced refresh, exactly one follow-up refresh runs ~4s later (never
+ *    chained) to cover a ContactsProvider aggregation window where the first callback
+ *    lands before the new aggregate is resolvable; leaving SELECTED cancels everything;
+ *  - [stop] unregisters, cancels pending work and shuts the executor down without awaiting,
  *    so leaving SELECTED releases everything promptly.
  *
  * Constructed only via [starter], which resolves the ContentResolver lazily at start time so a
@@ -36,6 +39,7 @@ internal fun interface ObserverHandle {
 internal object PolicyObserver {
 
     private const val DEBOUNCE_MS = 1750L
+    private const val FOLLOWUP_MS = 4000L
 
     fun starter(
         resolvers: () -> ContentResolver?,
@@ -50,16 +54,24 @@ internal object PolicyObserver {
                 Thread(task, "SkoposPolicyObs").apply { isDaemon = true }
             }
             var pending: ScheduledFuture<*>? = null
+            var followup: ScheduledFuture<*>? = null
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     pending?.cancel(false)
-                    pending = executor.schedule({ onFire() }, DEBOUNCE_MS, TimeUnit.MILLISECONDS)
+                    followup?.cancel(false)
+                    pending = executor.schedule({
+                        onFire()
+                        // One bounded follow-up, never chained: covers an aggregation window
+                        // where the first callback lands before the new aggregate resolves.
+                        followup = executor.schedule({ onFire() }, FOLLOWUP_MS, TimeUnit.MILLISECONDS)
+                    }, DEBOUNCE_MS, TimeUnit.MILLISECONDS)
                 }
             }
             resolver.registerContentObserver(ContactsContract.AUTHORITY_URI, true, observer)
             ObserverHandle {
                 runCatching { resolver.unregisterContentObserver(observer) }
                 pending?.cancel(false)
+                followup?.cancel(false)
                 executor.shutdown()
             }
         }.getOrNull()
