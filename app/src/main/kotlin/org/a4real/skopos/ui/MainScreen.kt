@@ -16,9 +16,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -51,8 +56,9 @@ import org.a4real.skopos.ui.theme.ThemeMode
 fun HomeScreen(
     onOpenContacts: () -> Unit,
     onOpenSettings: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
 ) {
-    Scaffold { innerPadding ->
+    Scaffold(bottomBar = bottomBar) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -116,13 +122,11 @@ fun HomeScreen(
 fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
-    manualInput: String,
-    onManualInputChange: (String) -> Unit,
-    manualError: String?,
-    onManualSubmit: () -> Unit,
+    onOpenAdvanced: () -> Unit,
     onBack: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
 ) {
-    Scaffold { innerPadding ->
+    Scaffold(bottomBar = bottomBar) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -148,8 +152,57 @@ fun SettingsScreen(
                 text = "Advanced",
                 style = MaterialTheme.typography.titleMedium,
             )
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenAdvanced() },
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "Advanced settings", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Manual package tools and power-user options.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdvancedSettingsScreen(
+    manualInput: String,
+    onManualInputChange: (String) -> Unit,
+    manualError: String?,
+    onManualSubmit: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Text(
-                text = "Add a package that launcher discovery cannot see. " +
+                text = "← Settings",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onBack() },
+            )
+            Text(text = "Advanced settings", style = MaterialTheme.typography.headlineLarge)
+
+            Text(
+                text = "Manual package",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Use this only for apps that do not appear in the normal app list. " +
+                    "Add a package that launcher discovery cannot see. " +
                     "Configuration can still be saved; enforcement needs Vector scope.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -725,6 +778,52 @@ private fun AdvancedSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+internal fun ManagerBottomBar(
+    current: BottomTab,
+    onSelect: (BottomTab) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = androidx.compose.foundation.shape.CircleShape,
+            tonalElevation = 3.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                NavigationBarItem(
+                    selected = current == BottomTab.HOME,
+                    onClick = { onSelect(BottomTab.HOME) },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Filled.Home,
+                            contentDescription = "Home",
+                        )
+                    },
+                    label = { Text("Home") },
+                )
+                NavigationBarItem(
+                    selected = current == BottomTab.SETTINGS,
+                    onClick = { onSelect(BottomTab.SETTINGS) },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                        )
+                    },
+                    label = { Text("Settings") },
+                )
+            }
         }
     }
 }

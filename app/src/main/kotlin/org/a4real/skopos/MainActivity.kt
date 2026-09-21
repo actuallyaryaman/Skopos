@@ -37,9 +37,13 @@ import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository
 import org.a4real.skopos.data.SearchQuery
 import org.a4real.skopos.data.ThemePreferences
+import org.a4real.skopos.ui.AdvancedSettingsScreen
 import org.a4real.skopos.ui.AppDetailScreen
 import org.a4real.skopos.ui.AppListScreen
+import org.a4real.skopos.ui.BottomTab
 import org.a4real.skopos.ui.HomeScreen
+import org.a4real.skopos.ui.ManagerBottomBar
+import org.a4real.skopos.ui.Route
 import org.a4real.skopos.ui.ScopeOption
 import org.a4real.skopos.ui.SettingsScreen
 import org.a4real.skopos.ui.theme.SkoposTheme
@@ -68,14 +72,6 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** Explicit navigation routes; detail state resets per package via key(). */
-    private sealed interface Route {
-        data object Home : Route
-        data object ContactsApps : Route
-        data class Detail(val packageName: String) : Route
-        data object Settings : Route
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -89,10 +85,27 @@ class MainActivity : ComponentActivity() {
             var manualError by remember { mutableStateOf<String?>(null) }
 
             SkoposTheme(themeMode = themeMode) {
+                // Single bottom-bar instance shared by top-level screens; drill-down
+                // screens (ContactsApps, Detail, AdvancedSettings) use back navigation.
+                val bottomBar: @Composable () -> Unit = {
+                    val tab = route.bottomTab()
+                    if (tab != null) {
+                        ManagerBottomBar(
+                            current = tab,
+                            onSelect = {
+                                route = when (it) {
+                                    BottomTab.HOME -> Route.Home
+                                    BottomTab.SETTINGS -> Route.Settings
+                                }
+                            },
+                        )
+                    }
+                }
                 when (val current = route) {
                     is Route.Home -> HomeScreen(
                         onOpenContacts = { route = Route.ContactsApps },
                         onOpenSettings = { route = Route.Settings },
+                        bottomBar = bottomBar,
                     )
                     is Route.ContactsApps -> {
                         BackHandler { route = Route.Home }
@@ -118,6 +131,14 @@ class MainActivity : ComponentActivity() {
                             onThemeModeChange = { mode ->
                                 scope.launch { themePreferences.setThemeMode(mode) }
                             },
+                            onOpenAdvanced = { route = Route.AdvancedSettings },
+                            onBack = { route = Route.Home },
+                            bottomBar = bottomBar,
+                        )
+                    }
+                    is Route.AdvancedSettings -> {
+                        BackHandler { route = Route.Settings }
+                        AdvancedSettingsScreen(
                             manualInput = manualInput,
                             onManualInputChange = {
                                 manualInput = it
@@ -134,7 +155,7 @@ class MainActivity : ComponentActivity() {
                                     manualError = null
                                 }
                             },
-                            onBack = { route = Route.Home },
+                            onBack = { route = Route.Settings },
                         )
                     }
                 }
