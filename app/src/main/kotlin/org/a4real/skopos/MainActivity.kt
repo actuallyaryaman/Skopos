@@ -35,9 +35,11 @@ import org.a4real.skopos.data.AppDiscovery
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository
+import org.a4real.skopos.data.SearchQuery
 import org.a4real.skopos.data.ThemePreferences
 import org.a4real.skopos.ui.AppDetailScreen
 import org.a4real.skopos.ui.AppListScreen
+import org.a4real.skopos.ui.HomeScreen
 import org.a4real.skopos.ui.ScopeOption
 import org.a4real.skopos.ui.theme.SkoposTheme
 import org.a4real.skopos.ui.theme.ThemeMode
@@ -65,31 +67,45 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Explicit navigation routes; detail state resets per package via key(). */
+    private sealed interface Route {
+        data object Home : Route
+        data object ContactsApps : Route
+        data class Detail(val packageName: String) : Route
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             val themeMode by themePreferences.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
             val scope = rememberCoroutineScope()
-            var selectedPackage by remember { mutableStateOf<String?>(null) }
+            var route by remember { mutableStateOf<Route>(Route.Home) }
 
             SkoposTheme(themeMode = themeMode) {
-                val pkg = selectedPackage
-                if (pkg == null) {
-                    AppList(
+                when (val current = route) {
+                    is Route.Home -> HomeScreen(
                         themeMode = themeMode,
                         onThemeModeChange = { mode ->
                             scope.launch { themePreferences.setThemeMode(mode) }
                         },
-                        onOpenApp = { selectedPackage = it },
+                        onOpenContacts = { route = Route.ContactsApps },
                     )
-                } else {
-                    BackHandler { selectedPackage = null }
-                    key(pkg) {
-                        AppDetail(
-                            targetPackage = pkg,
-                            onBack = { selectedPackage = null },
+                    is Route.ContactsApps -> {
+                        BackHandler { route = Route.Home }
+                        AppList(
+                            onOpenApp = { route = Route.Detail(it) },
+                            onBack = { route = Route.Home },
                         )
+                    }
+                    is Route.Detail -> {
+                        BackHandler { route = Route.ContactsApps }
+                        key(current.packageName) {
+                            AppDetail(
+                                targetPackage = current.packageName,
+                                onBack = { route = Route.ContactsApps },
+                            )
+                        }
                     }
                 }
             }
@@ -98,16 +114,16 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppList(
-        themeMode: ThemeMode,
-        onThemeModeChange: (ThemeMode) -> Unit,
         onOpenApp: (String) -> Unit,
+        onBack: () -> Unit,
     ) {
         val scope = rememberCoroutineScope()
         var tick by remember { mutableIntStateOf(0) }
         var connected by remember { mutableStateOf(false) }
         var query by remember { mutableStateOf("") }
         var showSystem by remember { mutableStateOf(false) }
-        var rows by remember { mutableStateOf(emptyList<AppRow>()) }
+        var managed by remember { mutableStateOf(emptyList<AppRow>()) }
+        var other by remember { mutableStateOf(emptyList<AppRow>()) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
         var manualInput by remember { mutableStateOf("") }
         var manualError by remember { mutableStateOf<String?>(null) }
@@ -136,16 +152,16 @@ class MainActivity : ComponentActivity() {
                         if (isConnected) repoFor(pkg).currentPolicy() else null
                     },
                 ).filter {
-                    q.isBlank() ||
-                        it.label.contains(q, ignoreCase = true) ||
-                        it.packageName.contains(q, ignoreCase = true)
+                    SearchQuery.matches(q, it.label, it.packageName)
                 }
-                Triple(isConnected, listRows, scopePkgs.size)
+                val (managedRows, otherRows) = AppDiscovery.groupApps(listRows)
+                Triple(isConnected, managedRows to otherRows, scopePkgs.size)
             }
             connected = result.first
-            rows = result.second
+            managed = result.second.first
+            other = result.second.second
             feedback = if (result.first) {
-                "${result.second.size} apps · ${result.third} in Vector scope."
+                "${managed.size + other.size} apps · ${result.third} in Vector scope."
             } else {
                 "Daemon not connected — showing discovery only."
             }
@@ -158,14 +174,13 @@ class MainActivity : ComponentActivity() {
         }
 
         AppListScreen(
-            themeMode = themeMode,
-            onThemeModeChange = onThemeModeChange,
             connected = connected,
             query = query,
             onQueryChange = { query = it },
             showSystem = showSystem,
             onShowSystemChange = { showSystem = it },
-            rows = rows,
+            managed = managed,
+            other = other,
             feedback = feedback,
             manualInput = manualInput,
             onManualInputChange = {
@@ -186,6 +201,7 @@ class MainActivity : ComponentActivity() {
             },
             onOpenApp = onOpenApp,
             onRefresh = { tick++ },
+            onBack = onBack,
         )
     }
 
@@ -408,6 +424,16 @@ class MainActivity : ComponentActivity() {
                     if (ok) pickerOpen = false
                     feedback = if (ok) "Policy cleared — native behavior."
                     else "Daemon not connected — not cleared."
+                    tick++
+                }
+            },
+            onRemoveFromScope = {
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) {
+                        repository.removeVectorScope(targetPackage)
+                    }
+                    feedback = if (ok) "Removed from Skopos scope. Saved contact policy was kept."
+                    else "Daemon not connected — still in scope."
                     tick++
                 }
             },

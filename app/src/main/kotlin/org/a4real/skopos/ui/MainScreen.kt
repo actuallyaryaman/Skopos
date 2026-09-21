@@ -32,6 +32,7 @@ import org.a4real.skopos.data.ContactsAccess
 import org.a4real.skopos.data.ContactsRetry
 import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository.DeviceContact
+import org.a4real.skopos.data.SearchQuery
 import org.a4real.skopos.ui.theme.ThemeMode
 
 /**
@@ -43,22 +44,10 @@ import org.a4real.skopos.ui.theme.ThemeMode
  * "Not configured" — never as an empty scope.
  */
 @Composable
-fun AppListScreen(
+fun HomeScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
-    connected: Boolean,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    showSystem: Boolean,
-    onShowSystemChange: (Boolean) -> Unit,
-    rows: List<AppRow>,
-    feedback: String,
-    manualInput: String,
-    onManualInputChange: (String) -> Unit,
-    manualError: String?,
-    onManualSubmit: () -> Unit,
-    onOpenApp: (String) -> Unit,
-    onRefresh: () -> Unit,
+    onOpenContacts: () -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -71,7 +60,76 @@ fun AppListScreen(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = "Skopos", style = MaterialTheme.typography.headlineLarge)
                 Text(
-                    text = "Privacy scoping for rooted devices.",
+                    text = "Choose what data apps can access.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenContacts() },
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "Contacts", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Control which contacts individual apps can see.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Text(
+                text = "More privacy controls coming later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            ThemeSection(themeMode = themeMode, onChange = onThemeModeChange)
+        }
+    }
+}
+
+@Composable
+fun AppListScreen(
+    connected: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    showSystem: Boolean,
+    onShowSystemChange: (Boolean) -> Unit,
+    managed: List<AppRow>,
+    other: List<AppRow>,
+    feedback: String,
+    manualInput: String,
+    onManualInputChange: (String) -> Unit,
+    manualError: String?,
+    onManualSubmit: () -> Unit,
+    onOpenApp: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "← Privacy controls",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onBack() },
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Contacts", style = MaterialTheme.typography.headlineLarge)
+                Text(
+                    text = "Choose an app to control which contacts it can see.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -96,34 +154,28 @@ fun AppListScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(rows, key = { it.packageName }) { row ->
-                    Surface(
-                        shape = MaterialTheme.shapes.medium,
-                        tonalElevation = 1.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenApp(row.packageName) },
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = row.label, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = row.packageName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = appStatusLine(row, connected),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (row.unverified) {
-                                Text(
-                                    text = "Package visibility unavailable — configuration can still be saved.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                if (managed.isNotEmpty()) {
+                    item(key = "header-managed") {
+                        Text(
+                            text = "MANAGED APPS",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    items(managed, key = { "m:${it.packageName}" }) { row ->
+                        AppRowCard(row = row, connected = connected, onOpenApp = onOpenApp)
+                    }
+                }
+                if (other.isNotEmpty()) {
+                    item(key = "header-other") {
+                        Text(
+                            text = "OTHER APPS",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    items(other, key = { "o:${it.packageName}" }) { row ->
+                        AppRowCard(row = row, connected = connected, onOpenApp = onOpenApp)
                     }
                 }
             }
@@ -167,8 +219,42 @@ fun AppListScreen(
                     .align(Alignment.End)
                     .clickable { onRefresh() },
             )
+        }
+    }
+}
 
-            ThemeSection(themeMode = themeMode, onChange = onThemeModeChange)
+@Composable
+private fun AppRowCard(
+    row: AppRow,
+    connected: Boolean,
+    onOpenApp: (String) -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenApp(row.packageName) },
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(text = row.label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = row.packageName,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = appStatusLine(row, connected),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (row.unverified) {
+                Text(
+                    text = "Package visibility unavailable — configuration can still be saved.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -219,6 +305,7 @@ fun AppDetailScreen(
     onRetryAccess: () -> Unit,
     onRefresh: () -> Unit,
     onReset: () -> Unit,
+    onRemoveFromScope: () -> Unit,
     onRequestVectorScope: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -296,7 +383,13 @@ fun AppDetailScreen(
                 connected = connected,
                 onChooseOption = onChooseOption,
                 onRefresh = onRefresh,
+            )
+        }
+
+        item {
+            AdvancedSection(
                 onReset = onReset,
+                onRemoveFromScope = onRemoveFromScope,
             )
         }
 
@@ -322,10 +415,17 @@ fun AppDetailScreen(
                         )
                     }
                 }
-                val shown = if (search.isBlank()) contacts
-                else contacts.filter {
-                    it.displayName.contains(search, ignoreCase = true) ||
-                        (it.secondary?.contains(search, ignoreCase = true) == true)
+                val shown = PickerPolicy.sortPicker(
+                    contacts.filter { contact ->
+                        SearchQuery.matches(search, contact.displayName, contact.secondary)
+                    },
+                ) { contact ->
+                    PickerPolicy.isRowChecked(
+                        contact.lookupKey,
+                        contact.id,
+                        selectedKeys,
+                        resolvedIds,
+                    )
                 }
                 if (shown.isEmpty()) {
                     item {
@@ -434,7 +534,6 @@ private fun ScopeTabs(
     connected: Boolean,
     onChooseOption: (ScopeOption) -> Unit,
     onRefresh: () -> Unit,
-    onReset: () -> Unit,
 ) {
     Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
         Column(
@@ -478,18 +577,45 @@ private fun ScopeTabs(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    text = "Reset policy",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.clickable { onReset() },
-                )
-                Text(
                     text = "Refresh",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickable { onRefresh() },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedSection(
+    onReset: () -> Unit,
+    onRemoveFromScope: () -> Unit,
+) {
+    Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Advanced", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Reset contact policy",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.clickable { onReset() },
+            )
+            Text(
+                text = "Remove from Skopos scope",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.clickable { onRemoveFromScope() },
+            )
+            Text(
+                text = "Removing scope keeps the saved contact policy; enforcement simply stops. " +
+                    "Re-adding the app later restores it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

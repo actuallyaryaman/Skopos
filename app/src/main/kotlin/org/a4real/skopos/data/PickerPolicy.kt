@@ -26,6 +26,22 @@ object PickerPolicy {
         if (!hasPermission) PickerOpenAction.RequestPermission else PickerOpenAction.OpenPicker
 
     /**
+     * Picker display order: checked rows first, then the rest; alphabetical by display name
+     * inside each group with a lookup-key tiebreak. Search filtering happens before this
+     * (caller passes the filtered list); checked-ness uses [isRowChecked] semantics via the
+     * caller-supplied [isChecked] predicate so this stays free of display state.
+     */
+    fun sortPicker(
+        contacts: List<PolicyRepository.DeviceContact>,
+        isChecked: (PolicyRepository.DeviceContact) -> Boolean,
+    ): List<PolicyRepository.DeviceContact> {
+        val byName = compareBy<PolicyRepository.DeviceContact> { it.displayName.lowercase() }
+            .thenBy { it.lookupKey }
+        val (checked, rest) = contacts.partition(isChecked)
+        return checked.sortedWith(byName) + rest.sortedWith(byName)
+    }
+
+    /**
      * Whether a picker row shows checked: its current lookup key is persisted, or its current
      * aggregate id was durably resolved from a persisted (possibly since-changed) key. The
      * second clause keeps a selected row checked across aggregate recreation.

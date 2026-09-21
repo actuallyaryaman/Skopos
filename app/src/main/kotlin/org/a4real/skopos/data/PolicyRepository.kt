@@ -108,6 +108,20 @@ class PolicyRepository private constructor(
     }
 
     /**
+     * Removes [packageName] from Vector module scope. Silent local daemon call (Vector only
+     * prompts when *adding* scope). The persisted Skopos policy is deliberately preserved:
+     * enforcement stops because Skopos is no longer injected, and re-adding the package
+     * later restores the saved policy.
+     */
+    fun removeVectorScope(packageName: String): Boolean {
+        val bound = service ?: return false
+        return runCatching {
+            bound.removeScope(listOf(packageName))
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
      * One real contact row for the production picker: aggregate id, durable lookup key,
      * display name, and a secondary line (first phone number, if any) to disambiguate
      * duplicate names. Lookup keys are the durable selection identity; numeric ids are

@@ -129,4 +129,17 @@ object AppDiscovery {
         }.filter { showSystem || !it.isSystem }
             .sortedBy { it.label.lowercase() }
     }
+
+    /**
+     * Splits assembled rows into (MANAGED, OTHER). Managed means Vector-active or holding a
+     * configured policy — deliberately surfacing previously configured apps even when Vector
+     * scope was removed. Alphabetical by label inside each group, package-name tiebreak.
+     */
+    fun groupApps(rows: List<AppRow>): Pair<List<AppRow>, List<AppRow>> {
+        val byName = compareBy<AppRow> { it.label.lowercase() }.thenBy { it.packageName }
+        val (managed, other) = rows.partition { row ->
+            row.vectorActive == true || row.policy is PolicyState.Configured
+        }
+        return managed.sortedWith(byName) to other.sortedWith(byName)
+    }
 }

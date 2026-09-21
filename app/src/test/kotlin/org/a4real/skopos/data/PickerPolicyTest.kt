@@ -2,6 +2,7 @@ package org.a4real.skopos.data
 
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
+import org.a4real.skopos.data.PolicyRepository.DeviceContact
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -95,8 +96,7 @@ class PickerPolicyTest {
     }
 
     @Test
-    fun `checking normalizes to the current row key without duplicates`() {
-        assertEquals(
+    fun `checking normalizes to the current row key without duplicates`() {        assertEquals(
             setOf("kNew"),
             PickerPolicy.toggledKeys(
                 selectedKeys = setOf("kOld"),
@@ -116,5 +116,28 @@ class PickerPolicyTest {
                 checking = true,
             ),
         )
+    }
+
+    private fun contact(id: Long, key: String, name: String) =
+        DeviceContact(id, key, name, secondary = null)
+
+    @Test
+    fun `selected contacts sort before unselected`() {
+        val ordered = PickerPolicy.sortPicker(
+            listOf(contact(1L, "k1", "Zed"), contact(2L, "k2", "Amy")),
+        ) { it.lookupKey == "k2" }
+        assertEquals(listOf("k2", "k1"), ordered.map { it.lookupKey })
+    }
+
+    @Test
+    fun `alphabetical within groups with lookup-key tiebreak`() {
+        val ordered = PickerPolicy.sortPicker(
+            listOf(
+                contact(3L, "kb", "Same"),
+                contact(1L, "ka", "Same"),
+                contact(2L, "kc", "Amy"),
+            ),
+        ) { it.lookupKey == "kb" }
+        assertEquals(listOf("kb", "kc", "ka"), ordered.map { it.lookupKey })
     }
 }

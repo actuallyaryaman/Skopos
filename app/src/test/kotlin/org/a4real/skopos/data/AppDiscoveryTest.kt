@@ -79,8 +79,7 @@ class AppDiscoveryTest {
     }
 
     @Test
-    fun `system toggle only filters the discoverable set`() {
-        val discovered = listOf(entry("com.user"), entry("com.sys", system = true))
+    fun `system toggle only filters the discoverable set`() {        val discovered = listOf(entry("com.user"), entry("com.sys", system = true))
         val hidden = AppDiscovery.assembleRows(
             scopePackages = emptyList(),
             discovered = discovered,
@@ -97,5 +96,60 @@ class AppDiscoveryTest {
             policyFor = { null },
         )
         assertEquals(2, shown.size)
+    }
+
+    private fun row(
+        pkg: String,
+        label: String = pkg,
+        vectorActive: Boolean? = false,
+        policy: PolicyState? = null,
+    ) = AppRow(pkg, label, declaresReadContacts = false, isSystem = false, vectorActive, policy)
+
+    @Test
+    fun `vector-active app is managed`() {
+        val (managed, other) = AppDiscovery.groupApps(
+            listOf(row("com.a", "A", vectorActive = false), row("com.b", "B", vectorActive = true)),
+        )
+        assertEquals(listOf("com.b"), managed.map { it.packageName })
+        assertEquals(listOf("com.a"), other.map { it.packageName })
+    }
+
+    @Test
+    fun `configured but vector-inactive app stays managed`() {
+        val (managed, other) = AppDiscovery.groupApps(
+            listOf(
+                row(
+                    "com.a",
+                    "A",
+                    vectorActive = false,
+                    policy = PolicyState.Configured(ContactScope.Empty),
+                ),
+            ),
+        )
+        assertEquals(listOf("com.a"), managed.map { it.packageName })
+        assertTrue(other.isEmpty())
+    }
+
+    @Test
+    fun `unconfigured inactive app is other`() {
+        val (managed, other) = AppDiscovery.groupApps(
+            listOf(row("com.a", "A", vectorActive = false, policy = PolicyState.Unset)),
+        )
+        assertTrue(managed.isEmpty())
+        assertEquals(listOf("com.a"), other.map { it.packageName })
+    }
+
+    @Test
+    fun `groups sort alphabetically with package tiebreak`() {
+        val (managed, other) = AppDiscovery.groupApps(
+            listOf(
+                row("com.z", "Same", vectorActive = true),
+                row("com.a", "Same", vectorActive = true),
+                row("com.m", "Middle", vectorActive = true),
+                row("com.o", "Other"),
+            ),
+        )
+        assertEquals(listOf("com.m", "com.a", "com.z"), managed.map { it.packageName })
+        assertEquals(listOf("com.o"), other.map { it.packageName })
     }
 }
