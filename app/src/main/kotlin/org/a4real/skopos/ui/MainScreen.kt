@@ -247,7 +247,18 @@ fun AppDetailScreen(
             }
         }
 
-        if (option == null) {
+        // Unknown (not yet read) must never present as unconfigured: only a loaded
+        // UNSET shows "Not configured". While disconnected the existing
+        // daemon-disconnected presentation below applies unchanged.
+        if (policy == null && connected) {
+            item {
+                Text(
+                    text = "Loading policy…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else if (option == null) {
             item {
                 Text(
                     text = "Not configured — $appLabel sees contacts normally.",
@@ -278,6 +289,7 @@ fun AppDetailScreen(
         item {
             ScopeTabs(
                 option = option,
+                tabsEnabled = policy != null || !connected,
                 feedback = feedback,
                 connected = connected,
                 onChooseOption = onChooseOption,
@@ -410,6 +422,7 @@ private fun VectorSection(
 @Composable
 private fun ScopeTabs(
     option: ScopeOption?,
+    tabsEnabled: Boolean,
     feedback: String,
     connected: Boolean,
     onChooseOption: (ScopeOption) -> Unit,
@@ -427,6 +440,7 @@ private fun ScopeTabs(
                     SegmentedButton(
                         selected = entry == option,
                         onClick = { onChooseOption(entry) },
+                        enabled = tabsEnabled,
                         shape = SegmentedButtonDefaults.itemShape(
                             index = index,
                             count = ScopeOption.tabs.size,
