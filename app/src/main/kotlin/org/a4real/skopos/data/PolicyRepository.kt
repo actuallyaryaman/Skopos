@@ -63,19 +63,69 @@ class PolicyRepository private constructor(
         }
     }
 
-    fun writeScope(scope: ContactScope): Boolean {
-        val bound = service ?: return false
-        return bound.getRemotePreferences(group())
-            .edit()
-            .putString(SkoposContract.POLICY_KEY, scope.encode())
-            .commit()
+    /**
+     * Remembered selection for this package: the stored entry when present, else the legacy
+     * fallback (an existing `SELECTED(keys)` scope acts as its own remembered set). Never
+     * touches the active scope. Empty when the daemon is unreachable.
+     */
+    fun readRememberedSelectedKeys(): Set<String> {
+        val bound = service ?: return emptySet()
+        val prefs = bound.getRemotePreferences(group())
+        val present = prefs.contains(RememberedPolicy.REMEMBERED_KEY)
+        val stored = RememberedPolicy.decode(prefs.getString(RememberedPolicy.REMEMBERED_KEY, null))
+        return RememberedPolicy.effectiveRemembered(present, stored, currentPolicy())
     }
 
     /**
-     * Removes the target's policy slot. The runtime observes the deletion and returns to
-     * [PolicyState.Unset] (native behavior).
+     * Single coherent write path: active scope plus remembered set in one atomic editor
+     * transaction. Callers compute both halves with [RememberedPolicy] first.
      */
-    fun resetPolicy(): Boolean {
+    private fun writePolicy(write: RememberedPolicy.PolicyWrite): Boolean {
+        val bound = service ?: return false
+        return bound.getRemotePreferences(group())
+            .edit()
+            .putString(SkoposContract.POLICY_KEY, write.scope.encode())
+            .putString(RememberedPolicy.REMEMBERED_KEY, RememberedPolicy.encode(write.remembered))
+            .commit()
+    }
+
+    /** Contact toggle inside SELECTED; deselect-last becomes explicit EMPTY + cleared memory. */
+    fun setSelected(nextKeys: Set<String>): Boolean =
+        writePolicy(RememberedPolicy.writeForToggle(nextKeys))
+
+    /** Enter FULL, preserving the current-or-remembered selection silently. */
+    fun setFullPreservingSelection(): Boolean {
+        if (service == null) return false
+        val remembered = RememberedPolicy.writeForModeChange(
+            currentPolicy(),
+            readRememberedSelectedKeys(),
+        )
+        return writePolicy(RememberedPolicy.PolicyWrite(ContactScope.Full, remembered))
+    }
+
+    /** Enter EMPTY, preserving the current-or-remembered selection silently. */
+    fun setEmptyPreservingSelection(): Boolean {
+        if (service == null) return false
+        val remembered = RememberedPolicy.writeForModeChange(
+            currentPolicy(),
+            readRememberedSelectedKeys(),
+        )
+        return writePolicy(RememberedPolicy.PolicyWrite(ContactScope.Empty, remembered))
+    }
+
+    /** Publish remembered keys as the active SELECTED scope; null = nothing to publish. */
+    fun selectRemembered(): Boolean? {
+        if (service == null) return false
+        val write = RememberedPolicy.writeForSelectTab(readRememberedSelectedKeys()) ?: return null
+        return writePolicy(write)
+    }
+
+    /**
+     * Clears both the active scope and the remembered selection (the whole per-package
+     * group). The runtime observes the deletion and returns to [PolicyState.Unset].
+     * Remove-from-scope, by contrast, preserves both.
+     */
+    fun resetContactPolicy(): Boolean {
         val bound = service ?: return false
         return runCatching {
             bound.deleteRemotePreferences(group())

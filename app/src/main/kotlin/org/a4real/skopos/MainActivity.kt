@@ -382,7 +382,7 @@ class MainActivity : ComponentActivity() {
                 when (chosen) {
                     ScopeOption.FULL -> scope.launch {
                         val ok = withContext(Dispatchers.IO) {
-                            repository.writeScope(ContactScope.Full)
+                            repository.setFullPreservingSelection()
                         }
                         if (ok) {
                             option = ScopeOption.FULL
@@ -397,7 +397,7 @@ class MainActivity : ComponentActivity() {
                     }
                     ScopeOption.EMPTY -> scope.launch {
                         val ok = withContext(Dispatchers.IO) {
-                            repository.writeScope(ContactScope.Empty)
+                            repository.setEmptyPreservingSelection()
                         }
                         if (ok) {
                             option = ScopeOption.EMPTY
@@ -415,16 +415,24 @@ class MainActivity : ComponentActivity() {
                             feedback = "Contacts access is needed to choose contacts."
                             permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                         }
-                        // Opening the picker is navigation only: it must never publish
-                        // (in particular never ContactScope.from(emptySet()) == EMPTY).
-                        // A SELECTED policy persists exclusively via contact toggles.
+                        // Opening the picker publishes only when remembered keys exist
+                        // (an explicit scope choice restoring them); otherwise navigation
+                        // only — never ContactScope.from(emptySet()) == EMPTY.
+                        // A SELECTED policy otherwise persists exclusively via toggles.
                         // Toggle writes below never touch pickerOpen, so even a failed
                         // write leaves the picker open on the durable (unchanged) state.
-                        PickerPolicy.PickerOpenAction.OpenPicker -> {
+                        PickerPolicy.PickerOpenAction.OpenPicker -> scope.launch {
+                            val published = withContext(Dispatchers.IO) {
+                                repository.selectRemembered()
+                            }
                             option = ScopeOption.SELECTED
                             userChose = true
                             pickerOpen = true
-                            feedback = "Choose contacts to publish a selection."
+                            feedback = when (published) {
+                                true -> "Restored remembered selection."
+                                false -> "Daemon not connected — not published."
+                                null -> "Choose contacts to publish a selection."
+                            }
                             tick++
                         }
                     }
@@ -438,10 +446,10 @@ class MainActivity : ComponentActivity() {
                     // normalizes to the current key without duplicates.
                     val rowId = contacts?.singleOrNull { it.lookupKey == key }?.id
                     val next = PickerPolicy.toggledKeys(selectedKeys, key, rowId, resolved, checked)
-                    val published = ContactScope.from(next)
-                    val ok = withContext(Dispatchers.IO) { repository.writeScope(published) }
+                    // Deselect-last becomes explicit EMPTY + cleared memory via setSelected.
+                    val ok = withContext(Dispatchers.IO) { repository.setSelected(next) }
                     if (ok) {
-                        option = ScopeOption.from(published)
+                        option = ScopeOption.from(ContactScope.from(next))
                         userChose = true
                         feedback = "Scope published to the daemon."
                     } else {
@@ -458,7 +466,7 @@ class MainActivity : ComponentActivity() {
             onRefresh = { tick++ },
             onReset = {
                 scope.launch {
-                    val ok = withContext(Dispatchers.IO) { repository.resetPolicy() }
+                    val ok = withContext(Dispatchers.IO) { repository.resetContactPolicy() }
                     userChose = false
                     if (ok) pickerOpen = false
                     feedback = if (ok) "Policy cleared — native behavior."
