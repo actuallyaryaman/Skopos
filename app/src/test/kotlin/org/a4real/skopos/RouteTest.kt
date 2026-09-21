@@ -1,5 +1,6 @@
 package org.a4real.skopos
 
+import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.ui.BottomTab
 import org.a4real.skopos.ui.Route
 import org.junit.Assert.assertEquals
@@ -8,11 +9,20 @@ import org.junit.Test
 
 class RouteTest {
 
+    private fun row(pkg: String) = AppRow(
+        packageName = pkg,
+        label = pkg,
+        declaresReadContacts = false,
+        isSystem = false,
+        vectorActive = false,
+        policy = null,
+    )
+
     @Test
     fun `back chain pops one level`() {
         assertEquals(
             Route.ContactsApps,
-            Route.Detail("com.example.app").back(),
+            Route.Detail(row("com.example.app")).back(),
         )
         assertEquals(Route.Home, Route.ContactsApps.back())
         assertEquals(Route.Home, Route.Settings.back())
@@ -25,7 +35,7 @@ class RouteTest {
         assertEquals(BottomTab.HOME, Route.Home.bottomTab())
         assertEquals(BottomTab.SETTINGS, Route.Settings.bottomTab())
         assertNull(Route.ContactsApps.bottomTab())
-        assertNull(Route.Detail("com.example.app").bottomTab())
+        assertNull(Route.Detail(row("com.example.app")).bottomTab())
         assertNull(Route.AdvancedSettings.bottomTab())
     }
 }

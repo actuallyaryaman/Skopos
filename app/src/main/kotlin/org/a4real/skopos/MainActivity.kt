@@ -33,7 +33,7 @@ import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
 import org.a4real.skopos.core.SkoposContract
 import org.a4real.skopos.data.AppDiscovery
-import org.a4real.skopos.data.AppActions
+import org.a4real.skopos.data.AppLaunch
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.PickerPolicy
 import org.a4real.skopos.data.PolicyRepository
@@ -118,9 +118,10 @@ class MainActivity : ComponentActivity() {
                     }
                     is Route.Detail -> {
                         BackHandler { route = Route.ContactsApps }
-                        key(current.packageName) {
+                        key(current.entry.packageName) {
                             AppDetail(
-                                targetPackage = current.packageName,
+                                targetPackage = current.entry.packageName,
+                                entry = current.entry,
                                 onBack = { route = Route.ContactsApps },
                             )
                         }
@@ -167,7 +168,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppList(
         manualPackages: Set<String>,
-        onOpenApp: (String) -> Unit,
+        onOpenApp: (AppRow) -> Unit,
         onBack: () -> Unit,
     ) {
         val scope = rememberCoroutineScope()
@@ -246,6 +247,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppDetail(
         targetPackage: String,
+        entry: AppRow,
         onBack: () -> Unit,
     ) {
         val scope = rememberCoroutineScope()
@@ -346,7 +348,7 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(Unit) {
             hasLaunchIntent = withContext(Dispatchers.IO) {
-                AppActions.launchSenderOrNull(packageManager, targetPackage) != null
+                AppLaunch.launchSenderOrNull(packageManager, targetPackage) != null
             }
         }
         LaunchedEffect(Unit) {
@@ -368,7 +370,7 @@ class MainActivity : ComponentActivity() {
 
         // Device rows keyed by durable lookup key; used only for display/selection identity.
         AppDetailScreen(
-            appLabel = targetPackage,
+            entry = entry,
             packageName = targetPackage,
             connected = connected,
             policy = policy,
@@ -494,25 +496,9 @@ class MainActivity : ComponentActivity() {
                     tick++
                 }
             },
-            onForceStop = {
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        AppActions.forceStopViaRoot(targetPackage)
-                    }
-                    feedback = when (result) {
-                        is AppActions.ForceStopResult.Success -> "App force-stopped."
-                        is AppActions.ForceStopResult.RootUnavailable ->
-                            "Could not force-stop app. Root access was unavailable or denied."
-                        is AppActions.ForceStopResult.Denied ->
-                            "Could not force-stop app (exit ${result.exitCode})."
-                        is AppActions.ForceStopResult.Timeout -> "Force-stop timed out."
-                        is AppActions.ForceStopResult.Failed -> "Could not force-stop app."
-                    }
-                }
-            },
             hasLaunchIntent = hasLaunchIntent == true,
             onOpenApp = {
-                val sender = AppActions.launchSenderOrNull(packageManager, targetPackage)
+                val sender = AppLaunch.launchSenderOrNull(packageManager, targetPackage)
                 if (sender == null) {
                     feedback = "Could not open app."
                 } else {

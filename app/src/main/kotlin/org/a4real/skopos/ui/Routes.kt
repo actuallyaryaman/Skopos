@@ -1,10 +1,12 @@
 package org.a4real.skopos.ui
 
+import org.a4real.skopos.data.AppRow
+
 /** Explicit manager navigation routes; detail state resets per package via key(). */
 internal sealed interface Route {
     data object Home : Route
     data object ContactsApps : Route
-    data class Detail(val packageName: String) : Route
+    data class Detail(val entry: AppRow) : Route
     data object Settings : Route
     data object AdvancedSettings : Route
 

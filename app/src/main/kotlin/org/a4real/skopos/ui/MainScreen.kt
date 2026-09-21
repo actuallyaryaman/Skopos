@@ -17,12 +17,14 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -219,7 +221,7 @@ fun AppListScreen(
     managed: List<AppRow>,
     other: List<AppRow>,
     feedback: String,
-    onOpenApp: (String) -> Unit,
+    onOpenApp: (AppRow) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -317,14 +319,14 @@ fun AppListScreen(
 private fun AppRowCard(
     row: AppRow,
     connected: Boolean,
-    onOpenApp: (String) -> Unit,
+    onOpenApp: (AppRow) -> Unit,
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
         tonalElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpenApp(row.packageName) },
+            .clickable { onOpenApp(row) },
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -414,7 +416,7 @@ private fun appStatusLine(row: AppRow, connected: Boolean): String {
 
 @Composable
 fun AppDetailScreen(
-    appLabel: String,
+    entry: AppRow,
     packageName: String,
     connected: Boolean,
     policy: PolicyState?,
@@ -440,7 +442,6 @@ fun AppDetailScreen(
     onRefresh: () -> Unit,
     onReset: () -> Unit,
     onRemoveFromScope: () -> Unit,
-    onForceStop: () -> Unit,
     hasLaunchIntent: Boolean,
     onOpenApp: () -> Unit,
     onRequestVectorScope: () -> Unit,
@@ -481,19 +482,33 @@ fun AppDetailScreen(
             )
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = appLabel, style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    text = packageName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (hasLaunchIntent) {
-            item {
-                OutlinedButton(onClick = onOpenApp, modifier = Modifier.fillMaxWidth()) {
-                    Text("Open app")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                AppIcon(icon = entry.icon, label = entry.label)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = entry.label,
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = entry.packageName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                if (hasLaunchIntent) {
+                    IconButton(onClick = onOpenApp) {
+                        Icon(
+                            imageVector = Icons.Filled.OpenInNew,
+                            contentDescription = "Launch app",
+                        )
+                    }
                 }
             }
         }
@@ -512,7 +527,7 @@ fun AppDetailScreen(
         } else if (option == null) {
             item {
                 Text(
-                    text = "Not configured — $appLabel sees contacts normally.",
+                    text = "Not configured — ${entry.label} sees contacts normally.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -552,7 +567,6 @@ fun AppDetailScreen(
             AdvancedSection(
                 onReset = onReset,
                 onRemoveFromScope = onRemoveFromScope,
-                onForceStop = onForceStop,
             )
         }
 
@@ -751,7 +765,6 @@ private fun ScopeTabs(
 private fun AdvancedSection(
     onReset: () -> Unit,
     onRemoveFromScope: () -> Unit,
-    onForceStop: () -> Unit,
 ) {
     Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
         Column(
@@ -774,18 +787,6 @@ private fun AdvancedSection(
             Text(
                 text = "Removing scope keeps the saved contact policy; enforcement simply stops. " +
                     "Re-adding the app later restores it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Force stop app",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.clickable { onForceStop() },
-            )
-            Text(
-                text = "Use if the app appears to retain stale state. Needs root; " +
-                    "never runs automatically.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
