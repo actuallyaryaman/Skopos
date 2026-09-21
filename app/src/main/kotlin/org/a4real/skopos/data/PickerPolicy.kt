@@ -42,6 +42,22 @@ object PickerPolicy {
     }
 
     /**
+     * Probably-deleted selections: persisted keys absent from a successfully loaded contact
+     * snapshot AND durably unresolvable. A not-yet-loaded (null) snapshot must never report
+     * stale — "not loaded yet" is not "loaded and missing".
+     */
+    fun staleKeys(
+        selectedKeys: Set<String>,
+        contacts: List<PolicyRepository.DeviceContact>?,
+        resolved: Map<String, Long?>,
+    ): Set<String> {
+        val rows = contacts ?: return emptySet()
+        return selectedKeys.filter { key ->
+            rows.none { it.lookupKey == key } && resolved[key] == null
+        }.toSet()
+    }
+
+    /**
      * Whether a picker row shows checked: its current lookup key is persisted, or its current
      * aggregate id was durably resolved from a persisted (possibly since-changed) key. The
      * second clause keeps a selected row checked across aggregate recreation.

@@ -1,12 +1,15 @@
 package org.a4real.skopos.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -22,6 +25,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,9 +49,8 @@ import org.a4real.skopos.ui.theme.ThemeMode
  */
 @Composable
 fun HomeScreen(
-    themeMode: ThemeMode,
-    onThemeModeChange: (ThemeMode) -> Unit,
     onOpenContacts: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -83,13 +86,90 @@ fun HomeScreen(
                 }
             }
 
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenSettings() },
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(text = "⚙", style = MaterialTheme.typography.titleMedium)
+                    Text(text = "Settings", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+
             Text(
                 text = "More privacy controls coming later.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
 
+@Composable
+fun SettingsScreen(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    manualInput: String,
+    onManualInputChange: (String) -> Unit,
+    manualError: String?,
+    onManualSubmit: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "← Privacy controls",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onBack() },
+            )
+            Text(text = "Settings", style = MaterialTheme.typography.headlineLarge)
+
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium,
+            )
             ThemeSection(themeMode = themeMode, onChange = onThemeModeChange)
+
+            Text(
+                text = "Advanced",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Add a package that launcher discovery cannot see. " +
+                    "Configuration can still be saved; enforcement needs Vector scope.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = manualInput,
+                onValueChange = onManualInputChange,
+                label = { Text("Package name") },
+                placeholder = { Text("com.example.app") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (manualError != null) {
+                Text(
+                    text = manualError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            OutlinedButton(onClick = onManualSubmit) { Text("Add package") }
         }
     }
 }
@@ -104,10 +184,6 @@ fun AppListScreen(
     managed: List<AppRow>,
     other: List<AppRow>,
     feedback: String,
-    manualInput: String,
-    onManualInputChange: (String) -> Unit,
-    manualError: String?,
-    onManualSubmit: () -> Unit,
     onOpenApp: (String) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
@@ -185,27 +261,6 @@ fun AppListScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
-                value = manualInput,
-                onValueChange = onManualInputChange,
-                label = { Text("Add package name manually") },
-                placeholder = { Text("com.example.app") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (manualError != null) {
-                Text(
-                    text = manualError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(onClick = onManualSubmit) { Text("Add package") }
-            }
             Text(
                 text = if (connected) "daemon connected" else "daemon disconnected",
                 style = MaterialTheme.typography.labelSmall,
@@ -236,22 +291,60 @@ private fun AppRowCard(
             .fillMaxWidth()
             .clickable { onOpenApp(row.packageName) },
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = row.label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = row.packageName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = appStatusLine(row, connected),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (row.unverified) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AppIcon(icon = row.icon, label = row.label)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = row.label, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    text = "Package visibility unavailable — configuration can still be saved.",
+                    text = row.packageName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = appStatusLine(row, connected),
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (row.unverified) {
+                    Text(
+                        text = "Package visibility unavailable — configuration can still be saved.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppIcon(
+    icon: androidx.compose.ui.graphics.ImageBitmap?,
+    label: String,
+) {
+    if (icon != null) {
+        androidx.compose.foundation.Image(
+            bitmap = icon,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp),
+        )
+    } else {
+        Surface(
+            shape = MaterialTheme.shapes.small,
+            tonalElevation = 2.dp,
+            modifier = Modifier.size(40.dp),
+        ) {
+            androidx.compose.foundation.layout.Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Text(
+                    text = label.firstOrNull()?.uppercase() ?: "?",
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -292,7 +385,8 @@ fun AppDetailScreen(
     pickerOpen: Boolean,
     selectedKeys: Set<String>,
     resolvedIds: Set<Long>,
-    contacts: List<DeviceContact>,
+    contacts: List<DeviceContact>?,
+    contactsLoading: Boolean,
     contactsError: Boolean,
     staleCount: Int,
     search: String,
@@ -309,6 +403,24 @@ fun AppDetailScreen(
     onRequestVectorScope: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // Memoized on its true inputs only: typing filters instantly in memory, while
+    // unrelated 2 s poll recompositions reuse the cached list. Null contacts means
+    // not loaded yet (never stale-inferring); the loading branch below covers it.
+    val shown = remember(search, contacts, selectedKeys, resolvedIds) {
+        val rows = contacts ?: emptyList()
+        PickerPolicy.sortPicker(
+            rows.filter { contact ->
+                SearchQuery.matches(search, contact.displayName, contact.secondary)
+            },
+        ) { contact ->
+            PickerPolicy.isRowChecked(
+                contact.lookupKey,
+                contact.id,
+                selectedKeys,
+                resolvedIds,
+            )
+        }
+    }
     Scaffold { innerPadding ->
     LazyColumn(
         modifier = Modifier
@@ -415,19 +527,16 @@ fun AppDetailScreen(
                         )
                     }
                 }
-                val shown = PickerPolicy.sortPicker(
-                    contacts.filter { contact ->
-                        SearchQuery.matches(search, contact.displayName, contact.secondary)
-                    },
-                ) { contact ->
-                    PickerPolicy.isRowChecked(
-                        contact.lookupKey,
-                        contact.id,
-                        selectedKeys,
-                        resolvedIds,
-                    )
-                }
-                if (shown.isEmpty()) {
+                // Memoized above on (search, contacts, selectedKeys, resolvedIds).
+                if (contactsLoading) {
+                    item {
+                        Text(
+                            text = "Loading contacts…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (shown.isEmpty()) {
                     item {
                         Text(
                             text = if (contactsError) "Couldn't load contacts — check access and retry."

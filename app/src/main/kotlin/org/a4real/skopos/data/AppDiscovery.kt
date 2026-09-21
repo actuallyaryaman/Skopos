@@ -20,6 +20,8 @@ data class AppRow(
     val policy: PolicyState?,
     /** True when PackageManager could not verify the package; configuration still allowed. */
     val unverified: Boolean = false,
+    /** Downscaled launcher icon loaded once during discovery; null renders a placeholder. */
+    val icon: androidx.compose.ui.graphics.ImageBitmap? = null,
 )
 
 /**
@@ -43,6 +45,7 @@ object AppDiscovery {
         val label: String,
         val declaresReadContacts: Boolean,
         val isSystem: Boolean,
+        val icon: androidx.compose.ui.graphics.ImageBitmap? = null,
     )
 
     fun launchableApps(context: Context): List<AppEntry> {
@@ -77,7 +80,7 @@ object AppDiscovery {
         }.getOrDefault(false)
         val system = appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 &&
             appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP == 0
-        AppEntry(packageName, label, declared, system)
+        AppEntry(packageName, label, declared, system, AppIconCache.get(context, packageName))
     }.getOrDefault(
         AppEntry(packageName, packageName, declaresReadContacts = false, isSystem = false),
     )
@@ -125,6 +128,7 @@ object AppDiscovery {
                 vectorActive = scopePackages?.contains(candidate),
                 policy = policy,
                 unverified = info == null,
+                icon = info?.icon,
             )
         }.filter { showSystem || !it.isSystem }
             .sortedBy { it.label.lowercase() }

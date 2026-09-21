@@ -41,6 +41,7 @@ import org.a4real.skopos.ui.AppDetailScreen
 import org.a4real.skopos.ui.AppListScreen
 import org.a4real.skopos.ui.HomeScreen
 import org.a4real.skopos.ui.ScopeOption
+import org.a4real.skopos.ui.SettingsScreen
 import org.a4real.skopos.ui.theme.SkoposTheme
 import org.a4real.skopos.ui.theme.ThemeMode
 
@@ -72,6 +73,7 @@ class MainActivity : ComponentActivity() {
         data object Home : Route
         data object ContactsApps : Route
         data class Detail(val packageName: String) : Route
+        data object Settings : Route
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,19 +83,21 @@ class MainActivity : ComponentActivity() {
             val themeMode by themePreferences.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
             val scope = rememberCoroutineScope()
             var route by remember { mutableStateOf<Route>(Route.Home) }
+            // Manual packages live above list and Settings so both screens share them.
+            var manualPackages by remember { mutableStateOf(emptySet<String>()) }
+            var manualInput by remember { mutableStateOf("") }
+            var manualError by remember { mutableStateOf<String?>(null) }
 
             SkoposTheme(themeMode = themeMode) {
                 when (val current = route) {
                     is Route.Home -> HomeScreen(
-                        themeMode = themeMode,
-                        onThemeModeChange = { mode ->
-                            scope.launch { themePreferences.setThemeMode(mode) }
-                        },
                         onOpenContacts = { route = Route.ContactsApps },
+                        onOpenSettings = { route = Route.Settings },
                     )
                     is Route.ContactsApps -> {
                         BackHandler { route = Route.Home }
                         AppList(
+                            manualPackages = manualPackages,
                             onOpenApp = { route = Route.Detail(it) },
                             onBack = { route = Route.Home },
                         )
@@ -107,6 +111,32 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    is Route.Settings -> {
+                        BackHandler { route = Route.Home }
+                        SettingsScreen(
+                            themeMode = themeMode,
+                            onThemeModeChange = { mode ->
+                                scope.launch { themePreferences.setThemeMode(mode) }
+                            },
+                            manualInput = manualInput,
+                            onManualInputChange = {
+                                manualInput = it
+                                manualError = null
+                            },
+                            manualError = manualError,
+                            onManualSubmit = {
+                                val pkg = manualInput.trim()
+                                if (!AppDiscovery.isValidPackageName(pkg)) {
+                                    manualError = "Not a valid package name (e.g. com.example.app)."
+                                } else {
+                                    manualPackages = manualPackages + pkg
+                                    manualInput = ""
+                                    manualError = null
+                                }
+                            },
+                            onBack = { route = Route.Home },
+                        )
+                    }
                 }
             }
         }
@@ -114,6 +144,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppList(
+        manualPackages: Set<String>,
         onOpenApp: (String) -> Unit,
         onBack: () -> Unit,
     ) {
@@ -122,18 +153,13 @@ class MainActivity : ComponentActivity() {
         var connected by remember { mutableStateOf(false) }
         var query by remember { mutableStateOf("") }
         var showSystem by remember { mutableStateOf(false) }
-        var managed by remember { mutableStateOf(emptyList<AppRow>()) }
-        var other by remember { mutableStateOf(emptyList<AppRow>()) }
+        var rawRows by remember { mutableStateOf(emptyList<AppRow>()) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
-        var manualInput by remember { mutableStateOf("") }
-        var manualError by remember { mutableStateOf<String?>(null) }
-        var manualPackages by remember { mutableStateOf(emptySet<String>()) }
 
-        LaunchedEffect(tick) {
+        LaunchedEffect(tick, manualPackages) {
             // Capture UI state on the main thread; the IO block below must not read it.
             val manual = manualPackages
             val system = showSystem
-            val q = query
             val result = withContext(Dispatchers.IO) {
                 // Connectivity probe: the daemon service is shared, so any repo instance
                 // reports the same bound state.
@@ -151,17 +177,13 @@ class MainActivity : ComponentActivity() {
                     policyFor = { pkg ->
                         if (isConnected) repoFor(pkg).currentPolicy() else null
                     },
-                ).filter {
-                    SearchQuery.matches(q, it.label, it.packageName)
-                }
-                val (managedRows, otherRows) = AppDiscovery.groupApps(listRows)
-                Triple(isConnected, managedRows to otherRows, scopePkgs.size)
+                )
+                Triple(isConnected, listRows, scopePkgs.size)
             }
             connected = result.first
-            managed = result.second.first
-            other = result.second.second
+            rawRows = result.second
             feedback = if (result.first) {
-                "${managed.size + other.size} apps · ${result.third} in Vector scope."
+                "${result.second.size} apps · ${result.third} in Vector scope."
             } else {
                 "Daemon not connected — showing discovery only."
             }
@@ -173,6 +195,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Pure in-memory filter + grouping: every keystroke updates immediately with
+        // zero provider/daemon work. SearchQuery import already present.
+        val visible = remember(query, rawRows) {
+            rawRows.filter { SearchQuery.matches(query, it.label, it.packageName) }
+        }
+        val managed = remember(visible) { AppDiscovery.groupApps(visible).first }
+        val other = remember(visible) { AppDiscovery.groupApps(visible).second }
+
         AppListScreen(
             connected = connected,
             query = query,
@@ -182,23 +212,6 @@ class MainActivity : ComponentActivity() {
             managed = managed,
             other = other,
             feedback = feedback,
-            manualInput = manualInput,
-            onManualInputChange = {
-                manualInput = it
-                manualError = null
-            },
-            manualError = manualError,
-            onManualSubmit = {
-                val pkg = manualInput.trim()
-                if (!AppDiscovery.isValidPackageName(pkg)) {
-                    manualError = "Not a valid package name (e.g. com.example.app)."
-                } else {
-                    manualPackages = manualPackages + pkg
-                    manualInput = ""
-                    manualError = null
-                    tick++
-                }
-            },
             onOpenApp = onOpenApp,
             onRefresh = { tick++ },
             onBack = onBack,
@@ -228,7 +241,7 @@ class MainActivity : ComponentActivity() {
         var vectorPending by remember { mutableStateOf(false) }
         var contactsGranted by remember { mutableStateOf(false) }
         var deniedPermanently by remember { mutableStateOf(false) }
-        var contacts by remember { mutableStateOf(emptyList<PolicyRepository.DeviceContact>()) }
+        var contacts by remember { mutableStateOf<List<PolicyRepository.DeviceContact>?>(null) }
         var contactsError by remember { mutableStateOf(false) }
         // Durable resolution of persisted keys to current aggregate ids; empty when the
         // picker is closed, permission is missing, or nothing is selected.
@@ -289,8 +302,12 @@ class MainActivity : ComponentActivity() {
                 else "Daemon not connected — changes are not published yet."
             }
             // Selection and picker rows always follow the durable store, never local edits.
-            contacts = loaded.contacts
-            contactsError = loaded.loadFailed
+            // Null means not loaded yet (never infer stale/deleted from it); a successful
+            // load always replaces it, error or closed picker leaves the last snapshot.
+            if (open) {
+                contacts = loaded.contacts
+                contactsError = loaded.loadFailed
+            }
             resolved = loaded.resolved
             if (!pickerInitDone && loaded.policy != null) {
                 pickerInitDone = true
@@ -310,12 +327,10 @@ class MainActivity : ComponentActivity() {
             ?.scope?.let { it as? ContactScope.Selected }?.lookupKeys ?: emptySet()
         // Durably resolved current ids for the persisted keys; a row counts checked when
         // its current key is stored or its id was resolved from a stored (possibly
-        // since-changed) key. Stale means absent from visible rows AND unresolvable.
+        // since-changed) key. Stale is only computed from a loaded snapshot.
         val resolvedIds = resolved.values.filterNotNull().toSet()
-        val staleCount = if (!contactsGranted || selectedKeys.isEmpty()) 0
-        else selectedKeys.count { key ->
-            contacts.none { it.lookupKey == key } && resolved[key] == null
-        }
+        val staleCount = if (!contactsGranted) 0
+        else PickerPolicy.staleKeys(selectedKeys, contacts, resolved).size
         val corrupt = policy is PolicyState.Corrupt
 
         // Device rows keyed by durable lookup key; used only for display/selection identity.
@@ -331,7 +346,8 @@ class MainActivity : ComponentActivity() {
             pickerOpen = pickerOpen,
             selectedKeys = selectedKeys,
             resolvedIds = resolvedIds,
-            contacts = contacts,
+            contacts = contacts ?: emptyList(),
+            contactsLoading = contacts == null,
             contactsError = contactsError,
             staleCount = staleCount,
             search = search,
@@ -397,7 +413,7 @@ class MainActivity : ComponentActivity() {
                     // persisted keys resolving to the same row (covers key-changed
                     // selections), so unchecking removes the durable entry and checking
                     // normalizes to the current key without duplicates.
-                    val rowId = contacts.singleOrNull { it.lookupKey == key }?.id
+                    val rowId = contacts?.singleOrNull { it.lookupKey == key }?.id
                     val next = PickerPolicy.toggledKeys(selectedKeys, key, rowId, resolved, checked)
                     val published = ContactScope.from(next)
                     val ok = withContext(Dispatchers.IO) { repository.writeScope(published) }

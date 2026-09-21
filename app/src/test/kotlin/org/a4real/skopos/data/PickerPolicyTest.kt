@@ -140,4 +140,40 @@ class PickerPolicyTest {
         ) { it.lookupKey == "kb" }
         assertEquals(listOf("kb", "kc", "ka"), ordered.map { it.lookupKey })
     }
+
+    @Test
+    fun `not-loaded contacts never report stale`() {
+        assertEquals(
+            emptySet<String>(),
+            PickerPolicy.staleKeys(setOf("k1", "k2"), null, mapOf("k1" to 7L)),
+        )
+        assertEquals(emptySet<String>(), PickerPolicy.staleKeys(emptySet(), null, emptyMap()))
+    }
+
+    @Test
+    fun `loaded contacts containing selection report no stale`() {
+        val rows = listOf(contact(7L, "k1", "Amy"))
+        assertEquals(
+            emptySet<String>(),
+            PickerPolicy.staleKeys(setOf("k1"), rows, mapOf("k1" to 7L)),
+        )
+    }
+
+    @Test
+    fun `loaded contacts missing unresolvable selection report stale`() {
+        val rows = listOf(contact(9L, "k9", "Zed"))
+        assertEquals(
+            setOf("k1"),
+            PickerPolicy.staleKeys(setOf("k1"), rows, mapOf("k1" to null)),
+        )
+    }
+
+    @Test
+    fun `missing row with resolvable key is not stale`() {
+        val rows = listOf(contact(9L, "k9", "Zed"))
+        assertEquals(
+            emptySet<String>(),
+            PickerPolicy.staleKeys(setOf("k1"), rows, mapOf("k1" to 7L)),
+        )
+    }
 }
