@@ -188,7 +188,10 @@ class MainActivity : ComponentActivity() {
                 val scopePkgs = if (isConnected) {
                     probe.vectorScope() ?: emptyList()
                 } else emptyList()
-                val discovered = AppDiscovery.launchableApps(this@MainActivity)
+                val discovered = AppDiscovery.discoverAppsForPermission(
+                    this@MainActivity,
+                    android.Manifest.permission.READ_CONTACTS,
+                )
                 val listRows = AppDiscovery.assembleRows(
                     scopePackages = if (isConnected) scopePkgs else null,
                     discovered = discovered,

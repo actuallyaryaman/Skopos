@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Complete installed-package inventory: required to find non-launchable apps that
+         declare sensitive permissions. Skopos is sideloaded as a privacy/security Vector
+         module, not distributed via Play. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- Launchable-app visibility for scope discovery (no QUERY_ALL_PACKAGES). -->
     <queries>

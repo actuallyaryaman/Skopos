@@ -280,7 +280,7 @@ fun AppListScreen(
                 if (other.isNotEmpty()) {
                     item(key = "header-other") {
                         Text(
-                            text = "OTHER APPS",
+                            text = "APPS WITH CONTACT ACCESS",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -403,8 +403,13 @@ private fun appStatusLine(row: AppRow, connected: Boolean): String {
         is PolicyState.Corrupt -> "scope: unreadable (fail-closed)"
         is PolicyState.Unset, null -> "scope: not configured"
     }
-    val contacts = if (row.declaresReadContacts) " · reads contacts" else ""
-    return "$vector · $policy$contacts"
+    // Declaration is proven by the manifest; grant state is metadata only, never a filter.
+    val access = if (!row.declaresReadContacts) "" else when (row.readContactsGranted) {
+        true -> " · Contacts allowed"
+        false -> " · Contacts not allowed"
+        null -> " · Declares Contacts access"
+    }
+    return "$vector · $policy$access"
 }
 
 @Composable

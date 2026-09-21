@@ -27,8 +27,14 @@ class AppDiscoveryTest {
         assertFalse(AppDiscovery.isValidPackageName("has-dash.com"))
     }
 
-    private fun entry(pkg: String, system: Boolean = false) =
-        AppDiscovery.AppEntry(pkg, pkg, declaresReadContacts = true, isSystem = system)
+    private fun entry(
+        pkg: String,
+        system: Boolean = false,
+        declares: Boolean = true,
+        granted: Boolean? = null,
+    ) = AppDiscovery.AppEntry(
+        pkg, pkg, declaresReadContacts = declares, readContactsGranted = granted, isSystem = system,
+    )
 
     @Test
     fun `one row policy failure degrades only that row`() {
@@ -79,7 +85,8 @@ class AppDiscoveryTest {
     }
 
     @Test
-    fun `system toggle only filters the discoverable set`() {        val discovered = listOf(entry("com.user"), entry("com.sys", system = true))
+    fun `system toggle only filters the discoverable set`() {
+        val discovered = listOf(entry("com.user"), entry("com.sys", system = true))
         val hidden = AppDiscovery.assembleRows(
             scopePackages = emptyList(),
             discovered = discovered,
@@ -103,7 +110,14 @@ class AppDiscoveryTest {
         label: String = pkg,
         vectorActive: Boolean? = false,
         policy: PolicyState? = null,
-    ) = AppRow(pkg, label, declaresReadContacts = false, isSystem = false, vectorActive, policy)
+    ) = AppRow(
+        packageName = pkg,
+        label = label,
+        declaresReadContacts = false,
+        isSystem = false,
+        vectorActive = vectorActive,
+        policy = policy,
+    )
 
     @Test
     fun `vector-active app is managed`() {
@@ -151,5 +165,81 @@ class AppDiscoveryTest {
         )
         assertEquals(listOf("com.m", "com.a", "com.z"), managed.map { it.packageName })
         assertEquals(listOf("com.o"), other.map { it.packageName })
+    }
+
+    private fun assemble(
+        discovered: List<AppDiscovery.AppEntry>,
+        scope: List<String> = emptyList(),
+        manual: Set<String> = emptySet(),
+        showSystem: Boolean = false,
+        policyFor: (String) -> PolicyState? = { null },
+    ) = AppDiscovery.assembleRows(
+        scopePackages = scope,
+        discovered = discovered,
+        manualPackages = manual,
+        showSystem = showSystem,
+        policyFor = policyFor,
+    ).map { it.packageName }
+
+    @Test
+    fun `unmanaged declaring app is included`() {
+        assertEquals(
+            listOf("com.chat"),
+            assemble(listOf(entry("com.chat"), entry("com.game", declares = false))),
+        )
+    }
+
+    @Test
+    fun `unmanaged non-declaring app is excluded`() {
+        assertTrue(
+            assemble(listOf(entry("com.game", declares = false))).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `managed app without declaration stays visible`() {
+        assertEquals(
+            listOf("com.old"),
+            assemble(
+                listOf(entry("com.old", declares = false)),
+                policyFor = { PolicyState.Configured(ContactScope.Empty) },
+            ),
+        )
+    }
+
+    @Test
+    fun `grant state never affects eligibility`() {
+        val denied = assemble(listOf(entry("com.a", granted = false)))
+        assertEquals(listOf("com.a"), denied)
+        val unknown = assemble(listOf(entry("com.a", granted = null)))
+        assertEquals(listOf("com.a"), unknown)
+    }
+
+    @Test
+    fun `non-launchable model with declaration is included`() {
+        // AppEntry carries no launcher property: eligibility never depended on it.
+        assertEquals(
+            listOf("com.svc"),
+            assemble(listOf(entry("com.svc"))),
+        )
+    }
+
+    @Test
+    fun `managed system app stays visible with toggle off`() {
+        assertEquals(
+            listOf("com.sys"),
+            assemble(
+                listOf(entry("com.sys", system = true, declares = false)),
+                scope = listOf("com.sys"),
+                showSystem = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `unmanaged system app follows the toggle`() {
+        val discovered = listOf(entry("com.sys", system = true))
+        assertTrue(assemble(discovered, showSystem = false).isEmpty())
+        assertEquals(listOf("com.sys"), assemble(discovered, showSystem = true))
     }
 }
