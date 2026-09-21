@@ -6,6 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * The deferred-initialization contract the physical-device run leans on. These run on the host
@@ -46,14 +49,25 @@ class PolicyCacheTest {
     }
 
     private class FakeResolver(
-        private val keyToId: Map<String, Long>,
-        var fail: Boolean = false,
+        private var keyToId: Map<String, Long>,
+        var failTransient: Boolean = false,
     ) : PolicyResolver {
         var calls = 0
-        override fun resolveKeys(lookupKeys: List<String>): Set<Long> {
+        var gate: CountDownLatch? = null
+        var enteredGate = CountDownLatch(1)
+
+        override fun resolveKeys(lookupKeys: List<String>): KeyResolution {
             calls++
-            if (fail) error("ContactsProvider unavailable")
-            return lookupKeys.mapNotNull { keyToId[it] }.toSet()
+            gate?.let {
+                enteredGate.countDown()
+                assertTrue(it.await(5, TimeUnit.SECONDS))
+            }
+            if (failTransient) return KeyResolution(emptySet(), 1)
+            return KeyResolution(lookupKeys.mapNotNull { keyToId[it] }.toSet(), 0)
+        }
+
+        fun forget(key: String) {
+            keyToId = keyToId - key
         }
     }
 
@@ -108,13 +122,13 @@ class PolicyCacheTest {
     }
 
     @Test
-    fun `resolver failure preserves keys with empty ids and retries`() {
+    fun `whole-call resolver throw is transient then recovers`() {
         val source = MemorySource(encodedSelected("phone"))
         val resolver = object : PolicyResolver {
             var fail = true
-            override fun resolveKeys(lookupKeys: List<String>): Set<Long> {
+            override fun resolveKeys(lookupKeys: List<String>): KeyResolution {
                 if (fail) error("ContactsProvider unavailable")
-                return setOf(7L)
+                return KeyResolution(setOf(7L), 0)
             }
         }
         val cache = PolicyCache(source, resolverProvider = { resolver })
@@ -243,14 +257,37 @@ class PolicyCacheTest {
     }
 
     @Test
-    fun `failed post-mutation resolution keeps keys and empties ids`() {
+    fun `transient failure preserves good snapshot then recovers`() {
         val source = MemorySource(encodedSelected("phone"))
         val resolver = FakeResolver(mapOf("phone" to 7L))
         val cache = PolicyCache(source, resolverProvider = { resolver })
         assertTrue(cache.ensureInitialized())
         assertEquals(setOf(7L), cache.current().allowedIds)
 
-        resolver.fail = true
+        // Same policy, transient failure: must not overwrite the good snapshot.
+        resolver.failTransient = true
+        source.fire()
+        assertEquals(setOf(7L), cache.current().allowedIds)
+        assertEquals(
+            PolicyState.Configured(ContactScope.Selected(setOf("phone"))),
+            cache.current().state,
+        )
+
+        resolver.failTransient = false
+        source.fire()
+        assertEquals(setOf(7L), cache.current().allowedIds)
+    }
+
+    @Test
+    fun `clean miss publishes empty immediately and stays fail-closed`() {
+        val source = MemorySource(encodedSelected("phone"))
+        val resolver = FakeResolver(mapOf("phone" to 7L))
+        val cache = PolicyCache(source, resolverProvider = { resolver })
+        assertTrue(cache.ensureInitialized())
+        assertEquals(setOf(7L), cache.current().allowedIds)
+
+        // Genuine deletion: the key no longer resolves cleanly (no transient involved).
+        resolver.forget("phone")
         source.fire()
 
         assertEquals(
@@ -259,8 +296,61 @@ class PolicyCacheTest {
         )
         assertTrue(cache.current().allowedIds.isEmpty())
 
-        resolver.fail = false
+        // Still fail-closed on the next refresh with nothing new to resolve.
         source.fire()
+        assertTrue(cache.current().allowedIds.isEmpty())
+    }
+
+    @Test
+    fun `newer FULL policy wins immediately over SELECTED`() {
+        val source = MemorySource(encodedSelected("phone"))
+        val cache = PolicyCache(source, resolverProvider = { FakeResolver(mapOf("phone" to 7L)) })
+        assertTrue(cache.ensureInitialized())
         assertEquals(setOf(7L), cache.current().allowedIds)
+
+        source.encoded = "FULL"
+        source.fire()
+
+        assertEquals(PolicyState.Configured(ContactScope.Full), cache.current().state)
+        assertTrue(cache.current().allowedIds.isEmpty())
+    }
+
+    @Test
+    fun `slow success is not discarded by newer transient failure`() {
+        val source = MemorySource(encodedSelected("phone"))
+        val resolver = FakeResolver(mapOf("phone" to 7L))
+        val cache = PolicyCache(source, resolverProvider = { resolver })
+        assertTrue(cache.ensureInitialized())
+        assertEquals(setOf(7L), cache.current().allowedIds)
+
+        // A slow in-flight reload (same policy) vs a fast transient failure: the failure
+        // must not overwrite the good snapshot, and the late success must still publish.
+        val slowGate = CountDownLatch(1)
+        resolver.gate = slowGate
+        resolver.enteredGate = CountDownLatch(1)
+        var slowResult = false
+        val slow = thread { slowResult = cache.refreshFromExternal() }
+        assertTrue(resolver.enteredGate.await(5, TimeUnit.SECONDS))
+        // The slow call is parked inside await on slowGate; clear the field so the fast
+        // reload below does not block on it.
+        resolver.gate = null
+
+        resolver.failTransient = true
+        assertFalse(cache.refreshFromExternal())
+        assertEquals(setOf(7L), cache.current().allowedIds)
+
+        resolver.failTransient = false
+        slowGate.countDown()
+        slow.join(5000)
+        assertTrue(slowResult)
+        assertEquals(setOf(7L), cache.current().allowedIds)
+    }
+
+    @Test
+    fun `follow-up schedule is bounded and finite`() {
+        val delays = PolicyObserver.followupDelaysMs
+        assertEquals(3, delays.size)
+        assertTrue(delays.all { it > 0 })
+        assertEquals(delays.sorted(), delays)
     }
 }

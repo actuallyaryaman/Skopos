@@ -54,13 +54,13 @@ internal class PolicyCache(
     private var version = 0L
 
     @Volatile
+    private var publishedIdentity: PolicyVersion? = null
+
+    @Volatile
     private var failureLogged = false
 
     @Volatile
     private var corruptLogged = false
-
-    @Volatile
-    private var resolveFailed = false
 
     @Volatile
     private var observerHandle: ObserverHandle? = null
@@ -102,7 +102,7 @@ internal class PolicyCache(
             ++version
             version
         }
-        val built = try {
+        val built: BuiltSnapshot = try {
             buildSnapshot(resolver)
         } catch (e: Throwable) {
             if (!failureLogged) {
@@ -112,26 +112,75 @@ internal class PolicyCache(
                     "policy reload failed (fail-closed EMPTY): ${e.message}",
                 )
             }
-            // Still serve fail-closed, but report unhealthy so initialization retries.
+            // Nothing was read: claim no new data, so a good snapshot is never
+            // overwritten by this failure. Still serve fail-closed when there is
+            // nothing good to keep, and report unhealthy so initialization retries.
             synchronized(lock) {
+                if (isSuccessSnapshot(snapshot)) return false
                 if (stamp != version) return false
                 snapshot = Snapshot(PolicyState.Configured(ContactScope.Empty), emptySet())
                 syncObserverLocked()
+                Log.d("SkoposRuntime", "reload published: EMPTY (after failure)")
             }
             return false
         }
         synchronized(lock) {
-            if (stamp != version) return false
-            snapshot = built
+            if (built.identity != publishedIdentity) {
+                // New policy data wins immediately — but only from the latest attempt,
+                // so a stale in-flight load cannot overwrite fresher data.
+                if (stamp != version) {
+                    Log.d("SkoposRuntime", "reload discarded (stale generation)")
+                    return false
+                }
+            } else if (built.outcome == Outcome.TRANSIENT && isSuccessSnapshot(snapshot)) {
+                // Same policy, transient failure: never overwrite a good snapshot with
+                // garbage. Bounded retries converge; genuinely newer data always wins.
+                Log.d("SkoposRuntime", "reload discarded (transient over success)")
+                return false
+            }
+            snapshot = built.snapshot
+            publishedIdentity = built.identity
             syncObserverLocked()
+            Log.d("SkoposRuntime", "reload published: ${describe(built.snapshot)}")
             return true
         }
     }
 
-    private fun buildSnapshot(resolver: PolicyResolver): Snapshot {
+    private fun isSuccessSnapshot(snapshot: Snapshot): Boolean = when (val state = snapshot.state) {
+        is PolicyState.Unset -> true
+        is PolicyState.Corrupt -> true
+        is PolicyState.Configured -> state.scope !is ContactScope.Selected ||
+            snapshot.allowedIds.isNotEmpty()
+    }
+
+    private fun describe(snapshot: Snapshot): String = when (val state = snapshot.state) {
+        is PolicyState.Unset -> "UNSET"
+        is PolicyState.Corrupt -> "CORRUPT"
+        is PolicyState.Configured -> when (val scope = state.scope) {
+            is ContactScope.Full -> "FULL"
+            is ContactScope.Empty -> "EMPTY"
+            is ContactScope.Selected -> "SELECTED(ids=${snapshot.allowedIds.size})"
+        }
+    }
+
+    /** Policy data identity behind a snapshot: what was read, not when it was read. */
+    private data class PolicyVersion(val present: Boolean, val encoded: String?)
+
+    private enum class Outcome { SUCCESS, CLEAN_MISS, TRANSIENT }
+
+    private data class BuiltSnapshot(
+        val snapshot: Snapshot,
+        val identity: PolicyVersion,
+        val outcome: Outcome,
+    )
+
+    private fun buildSnapshot(resolver: PolicyResolver): BuiltSnapshot {
         val present = source.contains()
         val encoded = source.encoded()
-        if (!present || encoded == null) return Snapshot(PolicyState.Unset, emptySet())
+        val identity = PolicyVersion(present, encoded)
+        if (!present || encoded == null) {
+            return BuiltSnapshot(Snapshot(PolicyState.Unset, emptySet()), identity, Outcome.SUCCESS)
+        }
         val scope = ContactScope.decode(encoded)
         if (scope is ContactScope.Empty && encoded != "EMPTY") {
             if (!corruptLogged) {
@@ -141,27 +190,28 @@ internal class PolicyCache(
                     "policy corrupt (mode=${encoded.substringBefore('\n')}), fail-closed",
                 )
             }
-            return Snapshot(PolicyState.Corrupt, emptySet())
+            return BuiltSnapshot(
+                Snapshot(PolicyState.Corrupt, emptySet()),
+                identity,
+                Outcome.SUCCESS,
+            )
         }
         val state = PolicyState.Configured(scope)
-        val allowedIds = if (scope is ContactScope.Selected) {
-            val ids = runCatching { resolver.resolveKeys(scope.lookupKeys.toList()) }.getOrNull()
-            if (ids == null) {
-                // Keys stay authoritative in [state]; only the resolved numeric set goes
-                // fail-closed. The next observer event or policy refresh retries.
-                if (!resolveFailed) {
-                    resolveFailed = true
-                    Log.w("SkoposRuntime", "key resolution failed (fail-closed, will retry)")
-                }
-                emptySet()
-            } else {
-                resolveFailed = false
-                ids
-            }
-        } else {
-            emptySet()
+        if (scope !is ContactScope.Selected) {
+            return BuiltSnapshot(Snapshot(state, emptySet()), identity, Outcome.SUCCESS)
         }
-        return Snapshot(state, allowedIds)
+        // Keys stay authoritative in [state]; only the resolved numeric set goes
+        // fail-closed. A clean miss (deleted or mid-reaggregation) takes effect but stays
+        // retryable inside the observer window; a transient failure additionally justifies
+        // retry and must never overwrite a good snapshot (see publish rules in reload).
+        val resolution = runCatching { resolver.resolveKeys(scope.lookupKeys.toList()) }.getOrNull()
+        val ids = resolution?.ids ?: emptySet()
+        val outcome = when {
+            ids.isNotEmpty() -> Outcome.SUCCESS
+            (resolution?.transientFailures ?: 1) > 0 -> Outcome.TRANSIENT
+            else -> Outcome.CLEAN_MISS
+        }
+        return BuiltSnapshot(Snapshot(state, ids), identity, outcome)
     }
 
     /**
@@ -193,5 +243,12 @@ internal interface PolicySource {
 
 /** Key-to-id resolution against ContactsProvider; the only piece needing the app context. */
 internal interface PolicyResolver {
-    fun resolveKeys(lookupKeys: List<String>): Set<Long>
+    fun resolveKeys(lookupKeys: List<String>): KeyResolution
 }
+
+/**
+ * Outcome of one resolution pass: the ids found plus how many keys failed transiently
+ * (busy/dead provider) as opposed to cleanly missing (deleted or mid-reaggregation).
+ * Callers fail closed on any empty set, but only transient failure justifies a retry.
+ */
+internal data class KeyResolution(val ids: Set<Long>, val transientFailures: Int)

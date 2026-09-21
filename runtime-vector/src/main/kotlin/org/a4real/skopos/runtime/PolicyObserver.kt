@@ -26,9 +26,10 @@ internal fun interface ObserverHandle {
  *  - a lazily created single-thread [ScheduledExecutorService] provides debounce delay plus
  *    serialization (one refresh at a time) in a single primitive — no permanent HandlerThread
  *    in processes that never select into SELECTED, and none held after leaving it;
- *  - after each debounced refresh, exactly one follow-up refresh runs ~4s later (never
- *    chained) to cover a ContactsProvider aggregation window where the first callback
- *    lands before the new aggregate is resolvable; leaving SELECTED cancels everything;
+ *  - after each debounced refresh, a finite set of follow-ups re-resolves (never
+ *    chained, never re-armed by follow-ups themselves) to cover a ContactsProvider
+ *    aggregation window where the first callback lands before the new aggregate is
+ *    resolvable; leaving SELECTED cancels everything;
  *  - [stop] unregisters, cancels pending work and shuts the executor down without awaiting,
  *    so leaving SELECTED releases everything promptly.
  *
@@ -39,7 +40,14 @@ internal fun interface ObserverHandle {
 internal object PolicyObserver {
 
     private const val DEBOUNCE_MS = 1750L
-    private const val FOLLOWUP_MS = 4000L
+
+    /**
+     * Bounded follow-up delays after each debounced refresh, covering a provider
+     * aggregation window where the first callback lands before the new aggregate is
+     * resolvable. Scheduled once per debounced fire (never chained, never re-armed by
+     * follow-ups themselves); any new mutation or stop cancels the whole set.
+     */
+    internal val followupDelaysMs: List<Long> = listOf(3000L, 6000L, 10000L)
 
     fun starter(
         resolvers: () -> ContentResolver?,
@@ -54,24 +62,28 @@ internal object PolicyObserver {
                 Thread(task, "SkoposPolicyObs").apply { isDaemon = true }
             }
             var pending: ScheduledFuture<*>? = null
-            var followup: ScheduledFuture<*>? = null
+            val followups = mutableListOf<ScheduledFuture<*>>()
+            fun cancelAll() {
+                pending?.cancel(false)
+                pending = null
+                followups.forEach { it.cancel(false) }
+                followups.clear()
+            }
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
-                    pending?.cancel(false)
-                    followup?.cancel(false)
+                    cancelAll()
                     pending = executor.schedule({
                         onFire()
-                        // One bounded follow-up, never chained: covers an aggregation window
-                        // where the first callback lands before the new aggregate resolves.
-                        followup = executor.schedule({ onFire() }, FOLLOWUP_MS, TimeUnit.MILLISECONDS)
+                        followupDelaysMs.forEach { delay ->
+                            followups += executor.schedule({ onFire() }, delay, TimeUnit.MILLISECONDS)
+                        }
                     }, DEBOUNCE_MS, TimeUnit.MILLISECONDS)
                 }
             }
             resolver.registerContentObserver(ContactsContract.AUTHORITY_URI, true, observer)
             ObserverHandle {
                 runCatching { resolver.unregisterContentObserver(observer) }
-                pending?.cancel(false)
-                followup?.cancel(false)
+                cancelAll()
                 executor.shutdown()
             }
         }.getOrNull()

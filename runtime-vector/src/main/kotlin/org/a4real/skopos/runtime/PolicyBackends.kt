@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.SharedPreferences
 import android.provider.ContactsContract
+import android.util.Log
 import org.a4real.skopos.core.SkoposContract
 
 /** [PolicySource] over the injected process's RemotePreferences snapshot. */
@@ -21,27 +22,48 @@ internal class PrefsPolicySource(private val prefs: SharedPreferences) : PolicyS
 
 /** [PolicyResolver] reading aggregate ids through the target application's ContentResolver. */
 internal class AppPolicyResolver(private val resolver: ContentResolver) : PolicyResolver {
-    override fun resolveKeys(lookupKeys: List<String>): Set<Long> {
-        if (lookupKeys.isEmpty()) return emptySet()
+    @Volatile
+    private var transientLogged = false
+
+    override fun resolveKeys(lookupKeys: List<String>): KeyResolution {
+        if (lookupKeys.isEmpty()) return KeyResolution(emptySet(), 0)
         val ids = mutableSetOf<Long>()
+        var transientFailures = 0
         Reentrancy.withGuard {
             // Durable per-key resolution: the provider's lookup path (exact key, then the
             // key's constituent raw-contact ids) survives aggregate recreation after edits,
-            // merges and splits, where raw LOOKUP_KEY equality would miss. Unresolvable keys
-            // are skipped individually so one bad key never drops the whole selection.
+            // merges and splits, where raw LOOKUP_KEY equality would miss. Outcomes stay
+            // distinct: clean nulls (deleted or mid-reaggregation) vs transient exceptions
+            // (busy/dead provider), so callers can fail closed now and still retry later.
             lookupKeys.forEach { key ->
-                runCatching {
-                    if (key.isEmpty()) return@forEach
+                if (key.isEmpty()) return@forEach
+                val id = runCatching {
                     val lookupUri = ContactsContract.Contacts.CONTENT_LOOKUP_URI
                         .buildUpon()
                         .appendPath(key)
                         .build()
                     val current = ContactsContract.Contacts.lookupContact(resolver, lookupUri)
-                        ?: return@forEach
-                    ids.add(ContentUris.parseId(current))
+                        ?: return@runCatching null
+                    ContentUris.parseId(current)
+                }.onFailure { e ->
+                    transientFailures++
+                    if (!transientLogged) {
+                        transientLogged = true
+                        Log.w(
+                            "SkoposRuntime",
+                            "lookup transient failure (${e::class.java.simpleName}), will retry",
+                        )
+                    }
+                }.getOrNull()
+                if (id == null) {
+                    Log.d("SkoposRuntime", "lookup unresolved: $key")
+                } else {
+                    transientLogged = false
+                    Log.d("SkoposRuntime", "lookup resolved: $key -> $id")
+                    ids.add(id)
                 }
             }
         }
-        return ids
+        return KeyResolution(ids, transientFailures)
     }
 }
