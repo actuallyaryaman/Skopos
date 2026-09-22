@@ -120,7 +120,6 @@ internal class PolicyCache(
                 if (stamp != version) return false
                 snapshot = Snapshot(PolicyState.Configured(ContactScope.Empty), emptySet())
                 syncObserverLocked()
-                Log.d("SkoposRuntime", "reload published: EMPTY (after failure)")
             }
             return false
         }
@@ -128,20 +127,15 @@ internal class PolicyCache(
             if (built.identity != publishedIdentity) {
                 // New policy data wins immediately — but only from the latest attempt,
                 // so a stale in-flight load cannot overwrite fresher data.
-                if (stamp != version) {
-                    Log.d("SkoposRuntime", "reload discarded (stale generation)")
-                    return false
-                }
+                if (stamp != version) return false
             } else if (built.outcome == Outcome.TRANSIENT && isSuccessSnapshot(snapshot)) {
                 // Same policy, transient failure: never overwrite a good snapshot with
                 // garbage. Bounded retries converge; genuinely newer data always wins.
-                Log.d("SkoposRuntime", "reload discarded (transient over success)")
                 return false
             }
             snapshot = built.snapshot
             publishedIdentity = built.identity
             syncObserverLocked()
-            Log.d("SkoposRuntime", "reload published: ${describe(built.snapshot)}")
             return true
         }
     }
@@ -151,16 +145,6 @@ internal class PolicyCache(
         is PolicyState.Corrupt -> true
         is PolicyState.Configured -> state.scope !is ContactScope.Selected ||
             snapshot.allowedIds.isNotEmpty()
-    }
-
-    private fun describe(snapshot: Snapshot): String = when (val state = snapshot.state) {
-        is PolicyState.Unset -> "UNSET"
-        is PolicyState.Corrupt -> "CORRUPT"
-        is PolicyState.Configured -> when (val scope = state.scope) {
-            is ContactScope.Full -> "FULL"
-            is ContactScope.Empty -> "EMPTY"
-            is ContactScope.Selected -> "SELECTED(ids=${snapshot.allowedIds.size})"
-        }
     }
 
     /** Policy data identity behind a snapshot: what was read, not when it was read. */

@@ -11,9 +11,13 @@ android {
         applicationId = "org.a4real.skopos"
         minSdk = 36
         targetSdk = 36
-        versionCode = 1
+        versionCode = 2
         versionName = "0.1"
     }
+
+    // Release signing is intentionally unconfigured: the release APK is signed by the
+    // release owner with an external key after a keystore is created separately. No
+    // signing credentials, property files, or debug-signing fallbacks belong here.
 
     buildFeatures {
         compose = true
@@ -62,8 +66,9 @@ android {
     }
 }
 tasks.matching {
-    it.name.startsWith("merge") &&
-        (it.name.contains("Assets") || it.name.contains("Resources"))
+    (it.name.startsWith("merge") &&
+        (it.name.contains("Assets") || it.name.contains("Resources"))) ||
+        it.name.contains("Lint", ignoreCase = true)
 }.configureEach {
     dependsOn(prepareGithubAvatar)
 }

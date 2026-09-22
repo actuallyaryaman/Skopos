@@ -29,6 +29,8 @@ internal class AppPolicyResolver(private val resolver: ContentResolver) : Policy
         if (lookupKeys.isEmpty()) return KeyResolution(emptySet(), 0)
         val ids = mutableSetOf<Long>()
         var transientFailures = 0
+        var resolved = 0
+        var unresolved = 0
         Reentrancy.withGuard {
             // Durable per-key resolution: the provider's lookup path (exact key, then the
             // key's constituent raw-contact ids) survives aggregate recreation after edits,
@@ -56,14 +58,19 @@ internal class AppPolicyResolver(private val resolver: ContentResolver) : Policy
                     }
                 }.getOrNull()
                 if (id == null) {
-                    Log.d("SkoposRuntime", "lookup unresolved: $key")
+                    unresolved++
                 } else {
                     transientLogged = false
-                    Log.d("SkoposRuntime", "lookup resolved: $key -> $id")
+                    resolved++
                     ids.add(id)
                 }
             }
         }
+        Log.d(
+            "SkoposRuntime",
+            "lookup finished: resolved=$resolved unresolved=$unresolved " +
+                "transientFailures=$transientFailures",
+        )
         return KeyResolution(ids, transientFailures)
     }
 }

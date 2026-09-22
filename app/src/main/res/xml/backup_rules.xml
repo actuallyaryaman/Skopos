@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Skopos manager keeps no restorable state worth backing up (only theme UI prefs);
+     contact policy lives in the Vector daemon's own store. Exclude everything so no
+     policy-adjacent data ever lands in cloud backup or device transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

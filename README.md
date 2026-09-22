@@ -1,55 +1,55 @@
 # Skopos
 
-A modern Android privacy-scoping framework for rooted devices.
+Skopos is an Android privacy module that controls which contacts individual apps can
+see. It runs on the Vector/libxposed framework: a manager app configures per-app Contact
+Scopes, and a small runtime narrows what scoped apps receive from the contacts provider.
 
-Version 0.1 will implement **Contact Scopes only** — letting a target application
-keep its Contacts permission while seeing all real contacts, a selected subset, or
-an intentionally empty contact dataset. Contact scopes are **not** implemented in
-this build.
+## Requirements
 
-## Current milestone: M0 (bootstrap)
+- Android 16 / API 36 (arm64 primary target)
+- Vector/libxposed environment (Magisk/KernelSU Zygisk, modern libxposed API)
+- Root, as required by the Vector environment itself
 
-M0 establishes the project foundation and proves the runtime integration only:
+## What v0.1 does
 
-- manager application foundation (Jetpack Compose, Material 3 Expressive, dynamic colors);
-- a minimal Vector module/runtime spike;
-- a dedicated test application the runtime hooks.
+Each configured app gets one Contact Scope:
 
-**This M0 build is a runtime/bootstrap spike. It does not scope, filter, or
-intercept anything.** Do not treat it as a working privacy product.
+- ALL CONTACTS — the app sees contacts normally
+- SELECTED — the app sees only chosen contacts (durable across edits)
+- NO CONTACTS — the app sees an empty contact dataset
+- Not configured (UNSET) — native behavior, no rewriting
 
-## Platform focus
+## Installation
 
-- Android 16 (API 36, `minSdk`/`targetSdk`) on arm64-v8a; `compileSdk` 37 so the
-  current stable androidx releases can link
-  (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md));
-- primary runtime/framework: [Vector](https://github.com/JingMatrix/Vector)
-  (Magisk/KernelSU Zygisk environment, modern libxposed API 102);
-- deliberately no Magisk-, KernelSU-, or APatch-specific application logic.
+1. Install the Skopos APK.
+2. In Vector, add the target app to the Skopos module scope and approve the prompt.
+3. Grant Skopos READ_CONTACTS so the picker and app discovery can list contacts.
+4. Open Skopos, pick the app, and choose its Contacts scope.
 
-## Contact Scope semantics
+## Privacy
 
-The eventual scope model distinguishes three deliberately distinct states:
+- No telemetry, no analytics, no crash reporting.
+- No runtime network dependency (external links open only when tapped).
+- Contact policy is stored per app by the Vector daemon; the manager keeps only UI
+  preferences locally, excluded from cloud backup/device transfer.
+- Skopos needs package visibility (`QUERY_ALL_PACKAGES`) to identify installed apps
+  that declare Contacts access, including non-launchable apps.
 
+## Build
+
+```sh
+./gradlew :app:assembleDebug
 ```
-FULL      all real contacts
-SELECTED  a chosen subset
-EMPTY     enabled but exposing zero contacts
+
+Unit tests:
+
+```sh
+./gradlew :core:test :runtime-vector:testDebugUnitTest :app:testDebugUnitTest
 ```
 
-`EMPTY` is intentional user choice — it is never merely permission-denied,
-disabled, or an accidental empty selection, and it is not represented as
-`Selected(emptySet())`. The model is deferred to the contact-scope milestone and
-does not exist in this M0 build.
+Release signing is owner-supplied: create a release keystore separately and sign the
+release APK outside this repository. No signing material is committed here.
 
-## Modules
+## License
 
-| Module            | Package                     | Role                                          |
-|-------------------|-----------------------------|-----------------------------------------------|
-| `app`             | `org.a4real.skopos`         | Manager application (M0 UI + theming)         |
-| `core`            | `org.a4real.skopos.core`    | Probe contract shared by runtime and test app |
-| `runtime-vector`  | `org.a4real.skopos.runtime` | Vector module APK (M0 hook spike)             |
-| `test-app`        | `org.a4real.skopos.test`    | Scoped test target                            |
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+GPLv3. See [LICENSE](LICENSE).
