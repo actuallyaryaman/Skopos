@@ -18,8 +18,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBarItem
@@ -27,6 +29,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenInNew
@@ -38,12 +44,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import org.a4real.skopos.core.ContactScope
 import org.a4real.skopos.core.PolicyState
+import org.a4real.skopos.data.AboutLinks
 import org.a4real.skopos.data.AboutMetadata
 import org.a4real.skopos.data.AppRow
 import org.a4real.skopos.data.ContactsAccess
@@ -201,12 +214,35 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
     metadata: AboutMetadata,
     onOpenUrl: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var licenseOpen by remember { mutableStateOf(false) }
+    // Packaged avatar asset (real avatar or generic fallback, chosen at build time);
+    // missing asset degrades to a drawn initial below.
+    val avatar = remember {
+        runCatching {
+            context.assets.open("github_avatar.png").use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
+    // Developer identity target: profile URL derived from the username only — never
+    // the repository URL and never with appended path segments.
+    val identityUrl = remember(metadata) {
+        val username = AboutLinks.githubUsername(metadata.projectUrl, metadata.developerHandle)
+        username?.let { AboutLinks.githubProfileUrl(it) } ?: ""
+    }
+    if (licenseOpen) {
+        ModalBottomSheet(onDismissRequest = { licenseOpen = false }) {
+            LicenseSheetContent(onClose = { licenseOpen = false })
+        }
+    }
     Scaffold { innerPadding ->
         Column(
             modifier = Modifier
@@ -222,6 +258,52 @@ fun AboutScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable { onBack() },
             )
+            // Profile card: avatar + identity, tappable to the trusted GitHub URL.
+            if (metadata.developerName.isNotBlank() || avatar != null) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                enabled = identityUrl.isNotBlank(),
+                                onClick = { onOpenUrl(identityUrl) },
+                            )
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (avatar != null) {
+                            Image(
+                                bitmap = avatar,
+                                contentDescription = "Open developer GitHub profile",
+                                modifier = Modifier
+                                    .size(96.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape),
+                            )
+                        } else {
+                            ProfileFallback(label = metadata.developerName)
+                        }
+                        if (metadata.developerName.isNotBlank()) {
+                            Text(
+                                text = metadata.developerName,
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                        }
+                        if (metadata.developerHandle.isNotBlank()) {
+                            Text(
+                                text = metadata.developerHandle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = "Skopos", style = MaterialTheme.typography.headlineLarge)
                 val versionLine = buildString {
@@ -247,77 +329,131 @@ fun AboutScreen(
                 )
             }
 
-            if (metadata.developerName.isNotBlank() || metadata.developerHandle.isNotBlank()) {
-                Text(
-                    text = "Developer",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (metadata.developerName.isNotBlank()) {
-                    Text(
-                        text = metadata.developerName,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-                if (metadata.developerHandle.isNotBlank()) {
-                    Text(
-                        text = metadata.developerHandle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (metadata.projectUrl.isNotBlank() || metadata.bugReportUrl.isNotBlank()) {
-                Text(
-                    text = "Project",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
             if (metadata.projectUrl.isNotBlank()) {
-                LinkRow(label = "Project source", onClick = { onOpenUrl(metadata.projectUrl) })
+                IconLinkRow(
+                    icon = Icons.Filled.Code,
+                    label = "GitHub",
+                    contentDescription = "Open project source",
+                    onClick = { onOpenUrl(metadata.projectUrl) },
+                )
             }
             if (metadata.bugReportUrl.isNotBlank()) {
-                LinkRow(label = "Report a bug", onClick = { onOpenUrl(metadata.bugReportUrl) })
+                IconLinkRow(
+                    icon = Icons.Filled.BugReport,
+                    label = "Report bug",
+                    contentDescription = "Report a bug",
+                    onClick = { onOpenUrl(metadata.bugReportUrl) },
+                )
             }
 
-            if (metadata.licenseName.isNotBlank()) {
-                Text(
-                    text = "Legal",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = metadata.licenseName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            IconLinkRow(
+                icon = Icons.Filled.Description,
+                label = "GPLv3",
+                contentDescription = "View GPL license",
+                trailing = {
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                    )
+                },
+                onClick = { licenseOpen = true },
+            )
         }
     }
 }
 
 @Composable
-private fun LinkRow(label: String, onClick: () -> Unit) {
+private fun ProfileFallback(label: String) {
+    Surface(
+        shape = androidx.compose.foundation.shape.CircleShape,
+        tonalElevation = 2.dp,
+        modifier = Modifier.size(96.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Text(
+                text = label.firstOrNull()?.uppercase() ?: "?",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IconLinkRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    contentDescription: String,
+    trailing: @Composable (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Surface(
         shape = MaterialTheme.shapes.medium,
         tonalElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .clickable(
+                onClickLabel = contentDescription,
+                onClick = onClick,
+            ),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+            )
             Text(
                 text = label,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
-            Icon(
-                imageVector = Icons.Filled.OpenInNew,
-                contentDescription = null,
-            )
+            trailing?.invoke()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LicenseSheetContent(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val licenseText = remember {
+        runCatching {
+            context.resources.openRawResource(org.a4real.skopos.R.raw.gplv3)
+                .bufferedReader().readText()
+        }.getOrDefault("License text unavailable.")
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "GNU General Public License v3",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(
+                    text = licenseText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        OutlinedButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+            Text("Close")
         }
     }
 }
