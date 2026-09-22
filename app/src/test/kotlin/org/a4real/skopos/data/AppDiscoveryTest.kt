@@ -303,4 +303,68 @@ class AppDiscoveryTest {
         assertTrue(managed.isEmpty())
         assertEquals(listOf("com.a"), other.map { it.packageName })
     }
+
+    private fun pendingEntry(pkg: String) =
+        AppDiscovery.AppEntry(pkg, pkg, declaresReadContacts = false, isSystem = false)
+
+    @Test
+    fun `pending packages stay visible until enrichment lands`() {
+        val rows = AppDiscovery.assembleRows(
+            scopePackages = null,
+            discovered = listOf(pendingEntry("com.pending")),
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+            alwaysInclude = setOf("com.pending"),
+        )
+        assertEquals(listOf("com.pending"), rows.map { it.packageName })
+        // Placeholder shows the package name with unknown daemon state.
+        assertEquals("com.pending", rows.single().label)
+        assertEquals(null, rows.single().policy)
+    }
+
+    @Test
+    fun `enriched non-declaring package drops out unless managed`() {
+        val discovered = listOf(entry("com.plain", declares = false))
+        val pending = AppDiscovery.assembleRows(
+            scopePackages = null,
+            discovered = discovered,
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+            alwaysInclude = setOf("com.plain"),
+        )
+        assertEquals(listOf("com.plain"), pending.map { it.packageName })
+        val enriched = AppDiscovery.assembleRows(
+            scopePackages = emptyList(),
+            discovered = discovered,
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+        )
+        assertTrue(enriched.isEmpty())
+    }
+
+    @Test
+    fun `enrichment fills placeholder without changing identity`() {
+        val before = AppDiscovery.assembleRows(
+            scopePackages = null,
+            discovered = listOf(pendingEntry("com.chat")),
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+            alwaysInclude = setOf("com.chat"),
+        )
+        val after = AppDiscovery.assembleRows(
+            scopePackages = emptyList(),
+            discovered = listOf(entry("com.chat")),
+            manualPackages = emptySet(),
+            showSystem = false,
+            policyFor = { null },
+        )
+        assertEquals(listOf("com.chat"), before.map { it.packageName })
+        assertEquals(listOf("com.chat"), after.map { it.packageName })
+        assertEquals("com.chat", after.single().label)
+        assertTrue(after.single().declaresReadContacts)
+    }
 }

@@ -255,18 +255,35 @@ class MainActivity : ComponentActivity() {
         var connected by remember { mutableStateOf(false) }
         var query by remember { mutableStateOf("") }
         var showSystem by remember { mutableStateOf(false) }
-        var rawEntries by remember { mutableStateOf(emptyList<AppDiscovery.AppEntry>()) }
+        var packageNames by remember { mutableStateOf(emptyList<String>()) }
+        var enriched by remember { mutableStateOf(emptyMap<String, AppDiscovery.AppEntry>()) }
         var enrichment by remember { mutableStateOf<Enrichment?>(null) }
         var feedback by remember { mutableStateOf("Waiting for the Vector daemon…") }
 
-        // Local inventory: PackageManager only, no daemon touch. Runs on entry, on
-        // manual-package change, and on explicit Refresh — never on the 5 s tick.
+        // Local inventory in two stages, PackageManager only, no daemon touch. Stage one
+        // publishes bare package names immediately (first paint); stage two enriches them
+        // in small chunks so rows fill in progressively instead of blocking on icon
+        // decoding. Runs on entry, on manual-package change, and on explicit Refresh —
+        // never on the 5 s tick.
         LaunchedEffect(manualPackages, inventoryTick) {
-            rawEntries = withContext(Dispatchers.IO) {
-                AppDiscovery.discoverAppsForPermission(
-                    this@MainActivity,
-                    android.Manifest.permission.READ_CONTACTS,
-                )
+            val names = withContext(Dispatchers.IO) {
+                AppDiscovery.discoverPackageNames(this@MainActivity)
+            }
+            packageNames = names
+            enriched = enriched.filterKeys { it in names }
+            for (chunk in names.chunked(25)) {
+                val batch = withContext(Dispatchers.IO) {
+                    chunk
+                        .filter { it !in enriched }
+                        .associateWith { pkg ->
+                            AppDiscovery.enrichEntry(
+                                this@MainActivity,
+                                pkg,
+                                android.Manifest.permission.READ_CONTACTS,
+                            )
+                        }
+                }
+                enriched = enriched + batch
             }
         }
 
@@ -275,7 +292,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(tick) {
             // Capture UI state on the main thread; the IO block below must not read it.
             val manual = manualPackages
-            val known = rawEntries.map { it.packageName }
+            val known = packageNames
             val result = withContext(Dispatchers.IO) {
                 // Connectivity probe: the daemon service is shared, so any repo instance
                 // reports the same bound state.
@@ -294,7 +311,7 @@ class MainActivity : ComponentActivity() {
             connected = result.connected
             enrichment = result
             feedback = if (result.connected) {
-                "${rawEntries.size} apps · ${result.scopePackages?.size ?: 0} in Vector scope."
+                "${packageNames.size} apps · ${result.scopePackages?.size ?: 0} in Vector scope."
             } else {
                 "Daemon not connected — showing discovery only."
             }
@@ -302,13 +319,21 @@ class MainActivity : ComponentActivity() {
 
         // Pure in-memory merge + filter + grouping: every keystroke updates immediately
         // with zero provider/daemon work. SearchQuery import already present.
-        val rows = remember(rawEntries, manualPackages, enrichment, showSystem) {
+        // Packages still awaiting enrichment render as lightweight placeholders so first
+        // paint never waits on icon decoding; relevance filtering applies once metadata
+        // lands (pending set keeps placeholders visible meanwhile).
+        val rows = remember(packageNames, enriched, manualPackages, enrichment, showSystem) {
+            val pending = packageNames.filter { it !in enriched }.toSet()
+            val discovered = enriched.values.toList() + pending.map { pkg ->
+                AppDiscovery.AppEntry(pkg, pkg, declaresReadContacts = false, isSystem = false)
+            }
             AppDiscovery.assembleRows(
                 scopePackages = enrichment?.scopePackages,
-                discovered = rawEntries,
+                discovered = discovered,
                 manualPackages = manualPackages,
                 showSystem = showSystem,
                 policyFor = { pkg -> enrichment?.policies?.get(pkg) },
+                alwaysInclude = pending,
             )
         }
         val visible = remember(query, rows) {

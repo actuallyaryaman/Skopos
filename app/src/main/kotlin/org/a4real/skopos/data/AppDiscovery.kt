@@ -46,6 +46,20 @@ object AppDiscovery {
     )
 
     /**
+     * Fast package inventory: one PackageManager call, no per-package work. Names render
+     * immediately; metadata follows progressively via [enrichEntry].
+     */
+    fun discoverPackageNames(context: Context): List<String> {
+        val pm = context.packageManager
+        return runCatching {
+            pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
+        }.getOrDefault(emptyList())
+            .map { it.packageName }
+            .filter { it != SkoposContract.MODULE_PACKAGE }
+            .distinct()
+    }
+
+    /**
      * Permission-oriented enumeration: every installed package (no launcher requirement),
      * enriched with metadata. [permission] selects which declaration is badged; only its
      * READ_CONTACTS use is wired today. Needs QUERY_ALL_PACKAGES for a complete inventory;
@@ -61,16 +75,17 @@ object AppDiscovery {
             .map { it.packageName }
             .filter { it != SkoposContract.MODULE_PACKAGE }
             .distinct()
-        return packages.map { pkg -> entryOrFallback(context, pkg, permission) }
+        return packages.map { pkg -> enrichEntry(context, pkg, permission) }
             .sortedBy { it.label.lowercase() }
     }
 
     /**
-     * Full enrichment, falling back to a package-name row when PackageInfo/ApplicationInfo
-     * lookup fails: a discovered package must stay visible. Best-effort system flag means a
-     * fallback row is treated as non-system (shown regardless of the toggle).
+     * Full enrichment for one package, falling back to a package-name row when
+     * PackageInfo/ApplicationInfo lookup fails: a discovered package must stay visible.
+     * Best-effort system flag means a fallback row is treated as non-system (shown
+     * regardless of the toggle). Icon decode happens here, once per package (cached).
      */
-    private fun entryOrFallback(
+    fun enrichEntry(
         context: Context,
         packageName: String,
         permission: String = Manifest.permission.READ_CONTACTS,
@@ -120,6 +135,7 @@ object AppDiscovery {
         manualPackages: Set<String>,
         showSystem: Boolean,
         policyFor: (String) -> PolicyState?,
+        alwaysInclude: Set<String> = emptySet(),
     ): List<AppRow> {
         val byPkg = discovered.associateBy { it.packageName }
         val candidates = ((scopePackages ?: emptyList()) +
@@ -145,9 +161,12 @@ object AppDiscovery {
         }.filter { row ->
             // Managed rows are always visible (existing configuration must never become
             // inaccessible), as are manually added packages (explicit user intent covers
-            // unverifiable cases). Unmanaged rows need READ_CONTACTS relevance; the system
-            // toggle only hides unmanaged system apps.
+            // unverifiable cases) and packages still awaiting enrichment (placeholders
+            // must paint first; relevance filtering applies once metadata lands).
+            // Unmanaged, enriched rows need READ_CONTACTS relevance; the system toggle
+            // only hides unmanaged system apps.
             row.isManaged || row.packageName in manualPackages ||
+                row.packageName in alwaysInclude ||
                 (row.declaresReadContacts && (showSystem || !row.isSystem))
         }.sortedBy { it.label.lowercase() }
     }
